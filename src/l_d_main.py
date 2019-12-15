@@ -16,12 +16,18 @@ import sys
 import platform
 import os
 from sortedcontainers import SortedDict
+from l_d_rois import PolyLineROI
 
 
 # class ZStackImages
 
 def get_image_from_tiff(file_name):
     """
+
+    Args:
+        file_name:
+
+    Returns:
 
     """
     try:
@@ -33,6 +39,8 @@ def get_image_from_tiff(file_name):
         layer_data = ImageSequence.Iterator(im)[0]
         n_frames = len(list(ImageSequence.Iterator(im)))
         dim_y, dim_x = np.array(im).shape
+
+
     # print(f"layer_data.shape {layer_data.shape}, np.max {np.max(layer_data)}, np.min{np.max(layer_data)}")
     return layer_data
 
@@ -105,26 +113,58 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
 
 class RoisManager:
 
-    def __init__(self, rois_id, n_displays):
-        # rois_id: tuple of strings
+    def __init__(self, rois_manager_id, n_displays, cells_display_keys):
+
         # each roi has a cell_id
-        rois_by_layer_dict = dict()
+        self.rois_by_layer_dict = dict()
         # how many displays, one will have modifiable ROIs, the others will be link to the modifiable one
         self.n_displays = n_displays
-        self.rois_id = rois_id
+        # rois_id: tuple of strings
+        self.rois_manager_id = rois_manager_id
+        self.cells_display_keys = cells_display_keys
 
-    def get_pg_rois(self, display_index):
-        # return pyqtgraph rois, original one or copies that are linked and non modifiables
-        # display_index 0 is the modifiable one
-        pass
+        # there because of PolyLineRoi instances
+        self.display_rois = True
+
+    def get_pg_rois(self, cells_display_key, layer_index):
+        """
+        cells_display_key: string representing the cellDisplayWidget instance
+        layer_index: Int between 0 and 6
+        return pyqtgraph rois, original one or copies that are linked and non modifiables
+        display_index 0 is the modifiable one
+        """
+
+        return self.rois_by_layer_dict[layer_index][cells_display_key]
 
     def load_rois_coordinates_from_masks(self, mask_imgs):
         # rois c
+        individual_roi_id = 0
         for layer, mask_img in enumerate(mask_imgs):
-            contours = get_contours_from_mask_img(mask_img = mask_img)
+
+            self.rois_by_layer_dict[layer] = dict()
+            contours = get_contours_from_mask_img(mask_img=mask_img)
+
+            for contour in contours:
+                display_id = 0
+                main_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=True,
+                                       invisible_handle=False, alterable=True, no_seq_hover_action=False,
+                                       roi_id=individual_roi_id, config_widget=self)
+                if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
+                    self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
+                self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
+                for display_id in np.arange(1, self.n_displays):
+                    other_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=False,
+                                            invisible_handle=False, alterable=False, no_seq_hover_action=True,
+                                            roi_id=individual_roi_id, config_widget=self)
+                    main_roi.link_a_roi(roi_to_link=other_roi)
+                    if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
+                        self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
+                    self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(other_roi)
+                individual_roi_id += 1
+
             # now we want to create rois
-            print(f"contours len {len(contours)}")
-            print(f"contours {contours}")
+            # print(f"contours len {len(contours)}")
+            # print(f"contours {contours}")
 
     def _initiate_cells_id(self):
         # from laoded masks, determine how many cells are present and give an cell_id to each mask
@@ -588,8 +628,8 @@ class CentralWidget(QWidget):
     def __init__(self, main_window):
         super().__init__(parent=main_window)
 
-        root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-        # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+        # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+        root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
 
         result_path = os.path.join(root_path, "results_ld")
 
@@ -611,29 +651,33 @@ class CentralWidget(QWidget):
 
         self.grid_layout = QGridLayout()
 
-        cells_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="red",
+        self.cells_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
+                                                   key_image="red",
                                               id_widget="red", main_window=main_window)
-        self.grid_layout.addWidget(cells_widget, 0, 0)
+        self.grid_layout.addWidget(self.cells_widget, 0, 0)
 
-        cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="cfos",
+        self.cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
+                                                  key_image="cfos",
                                               id_widget="cfos", main_window=main_window)
-        self.grid_layout.addWidget(cfos_widget, 0, 1)
+        self.grid_layout.addWidget(self.cfos_widget, 0, 1)
 
-        cfos_widget.link_to_view(view=cells_widget.view)
+        self.cfos_widget.link_to_view(view=self.cells_widget.view)
 
-        mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="mask",
+        self.mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
+                                                  key_image="mask",
                                               id_widget="mask", main_window=main_window)
-        self.grid_layout.addWidget(mask_widget, 1, 0)
+        self.grid_layout.addWidget(self.mask_widget, 1, 0)
 
-        mask_widget.link_to_view(view=cells_widget.view)
+        self.mask_widget.link_to_view(view=self.cells_widget.view)
 
-        overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="red",
-                                              id_widget="red_bis", main_window=main_window)
-
-        overlap_widget.link_to_view(view=cells_widget.view)
-        self.grid_layout.addWidget(overlap_widget, 1, 1)
-
-        self.cells_display_widgets = [cells_widget, cfos_widget, mask_widget, overlap_widget]
+        # self.overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
+        #                                         key_image="red",
+        #                                       id_widget="red_bis", main_window=main_window)
+        #
+        # self.overlap_widget.link_to_view(view=self.cells_widget.view)
+        # self.grid_layout.addWidget(self.overlap_widget, 1, 1)
+        # , self.overlap_widget
+        self.cells_display_widgets = [self.cells_widget, self.cfos_widget, self.mask_widget]
 
         self.main_layout.addLayout(self.grid_layout)
 
@@ -711,7 +755,8 @@ class CentralWidget(QWidget):
 
     def _get_rois_manager(self, image_keys):
         if image_keys not in self.rois_manager_dict:
-            roi_manager = RoisManager(rois_id=image_keys, n_displays=3)
+            cells_display_keys = ["mask", "red", "cfos"]
+            roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3, cells_display_keys=cells_display_keys)
             self.rois_manager_dict[image_keys] = roi_manager
             # if not yet created, then we load the rois from the mask data
             data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
@@ -722,10 +767,10 @@ class CentralWidget(QWidget):
 
     def display_selected_field(self):
         image_keys = self.combo_box.get_value()
-        self._get_rois_manager(tuple(image_keys))
+        roi_manager = self._get_rois_manager(tuple(image_keys))
         # print(f"image_keys {image_keys}")
         for cells_display_widget in self.cells_display_widgets:
-            cells_display_widget.set_images(image_keys)
+            cells_display_widget.set_images(image_keys, roi_manager)
 
 
 class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
@@ -757,25 +802,40 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
 
         # different layer
         self.images = None
+        # list of pyqtgraph rois
+        self.current_pg_rois = []
+        self.roi_manager = None
 
     def load_contours(self, contours):
         pass
 
-    def set_images(self, image_keys):
+    def set_images(self, image_keys, roi_manager):
         """
         List of string
         """
+        self.roi_manager = roi_manager
+        self._update_pg_rois()
+
         data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
-
+        self.images = get_image_from_tiff(file_name=data_dict[self.id_widget])
         # print(f"key_image {self.last_image_key} {data_dict[self.last_image_key]}")
-        data = get_image_from_tiff(file_name=data_dict[self.last_image_key])
-
-        self.images = data
 
         self._update_display()
 
+    def _update_pg_rois(self):
+        # pg as pyqtgraph
+        new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key=self.id_widget, layer_index=self.current_layer)
+        if len(self.current_pg_rois) > 0:
+            for pg_roi in self.current_pg_rois:
+                self.view.removeItem(pg_roi)
+        self.current_pg_rois = new_pg_rois
+        for pg_roi in self.current_pg_rois:
+            self.view.addItem(pg_roi)
+
     def set_layer(self, layer):
         self.current_layer = layer
+        self._update_pg_rois()
+
         self._update_display()
 
     def _update_display(self):
@@ -793,6 +853,7 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
             #     f"{len(np.where(image_to_display == np.max(image_to_display))[0])}")
 
         #     image_to_display = np.reshape(image_to_display, (image_to_display.shape[0], image_to_display.shape[1], 1))
+        # print(f"id_widget {self.id_widget}, image shape {image_to_display.shape}")
         self.image_displayed.setImage(image_to_display)
 
     def keyPressEvent(self, event):
@@ -823,21 +884,22 @@ def get_contours_from_mask_img(mask_img):
     """
 
     :param mask_img:
-    :return: contours as a list of n_cells list, each following list containt paris of int representing xy coords
+    :return: contours as a list of n_cells list, each following list contain pairs of int representing xy coords
     """
     mask_with_contours = mask_img.copy()
     if len(mask_with_contours.shape) < 3:
         mask_with_contours = np.reshape(mask_with_contours, (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
-    # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) #
+    # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # CHAIN_APPROX_SIMPLE CHAIN_APPROX_TC89_L1
 
     coord_contours = []
     for contour in contours:
         xy = []
         for c in contour:
-            xy.append([c[0][0], c[0][1]])
+            xy.append([c[0][0]+0.5, c[0][1]+0.5])
         # removing the contour that take all the frame
-        if [0, 0] in xy:
+        if [0.5, 0.5] in xy:
             continue
         coord_contours.append(xy)
 
@@ -856,6 +918,10 @@ class PlanMask:
         # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) #
         contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         self.all_contours = contours
+        # print(f"contours len {len(contours)}")
+        # for contour in contours:
+        #     print(f"contour shape {contour.shape}")
+        # print(f"contours {contours}")
         self.n_cells = len(self.all_contours)
         # print(f"contours {contours}")
         # Draw all contours
@@ -906,6 +972,7 @@ class PlanMask:
 
 def main():
     root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+    root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
     result_path = os.path.join(root_path, "results_ld")
 
     masks_path = os.path.join(root_path, "masques")

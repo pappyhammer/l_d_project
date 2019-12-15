@@ -122,6 +122,9 @@ class ROI(GraphicsObject):
                  ):
         # QObjectWorkaround.__init__(self)
         GraphicsObject.__init__(self, parent)
+        # list of ROI instances linked to that one
+        # every modification on that roi should happend as well to linked ones
+        self.linked_rois = []
         self.setAcceptedMouseButtons(QtCore.Qt.NoButton)
         pos = Point(pos)
         size = Point(size)
@@ -163,6 +166,13 @@ class ROI(GraphicsObject):
         self.rotateSnap = rotateSnap
         self.scaleSnap = scaleSnap
         # self.setFlag(self.ItemIsSelectable, True)
+
+    def link_a_roi(self, roi_to_link):
+        self.linked_rois.append(roi_to_link)
+        # now links the handles
+        for handle_index, handle in enumerate(self.handles):
+            # should be the same indexing
+            handle['item'].add_handle_to_link(handle_to_link=roi_to_link.handles[handle_index]['item'])
 
     def getState(self):
         return self.stateCopy()
@@ -352,6 +362,8 @@ class ROI(GraphicsObject):
         self.setPos(newState['pos'], update=update, finish=finish)
         # if 'update' not in kargs or kargs['update'] is True:
         # self.stateChanged()
+        for link_roi in self.linked_rois:
+            link_roi.translate(*args, **kargs)
 
     def rotate(self, angle, update=True, finish=True):
         """
@@ -361,9 +373,13 @@ class ROI(GraphicsObject):
         description of these).
         """
         self.setAngle(self.angle() + angle, update=update, finish=finish)
+        for link_roi in self.linked_rois:
+            link_roi.rotate(angle, update=update, finish=finish)
 
     def handleMoveStarted(self):
         self.preMoveState = self.getState()
+        for link_roi in self.linked_rois:
+            link_roi.handleMoveStarted()
 
     def addTranslateHandle(self, pos, axes=None, item=None, name=None, index=None):
         """
@@ -387,6 +403,9 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        for link_roi in self.linked_rois:
+            link_roi.addTranslateHandle(pos=pos, axes=axes, item=item, name=name, index=index)
+
         pos = Point(pos)
         return self.addHandle({'name': name, 'type': 't', 'pos': pos, 'item': item}, index=index)
 
@@ -408,9 +427,18 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        # handles_to_link = []
+        # for link_roi in self.linked_rois:
+        #     handle_to_link = link_roi.addFreeHandle(pos=pos, axes=axes, item=item, name=name, index=index)
+        #     handles_to_link.append(handle_to_link)
         if pos is not None:
             pos = Point(pos)
-        return self.addHandle({'name': name, 'type': 'f', 'pos': pos, 'item': item}, index=index)
+        new_handle = self.addHandle({'name': name, 'type': 'f', 'pos': pos, 'item': item}, index=index)
+
+        # for handle_to_link in handles_to_link:
+        #     new_handle.add_handle_to_link(handle_to_link=handle_to_link)
+
+        return new_handle
 
     def addScaleHandle(self, pos, center, axes=None, item=None, name=None, lockAspect=False, index=None):
         """
@@ -434,6 +462,8 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        for link_roi in self.linked_rois:
+            link_roi.addScaleHandle(pos=pos, center=center, axes=axes, item=item, name=name, index=index)
         pos = Point(pos)
         center = Point(center)
         info = {'name': name, 'type': 's', 'center': center, 'pos': pos, 'item': item, 'lockAspect': lockAspect}
@@ -463,6 +493,8 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        for link_roi in self.linked_rois:
+            link_roi.addRotateHandle(pos=pos, center=center, item=item, name=name, index=index)
         pos = Point(pos)
         center = Point(center)
         return self.addHandle({'name': name, 'type': 'r', 'center': center, 'pos': pos, 'item': item}, index=index)
@@ -489,6 +521,8 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        for link_roi in self.linked_rois:
+            link_roi.addScaleRotateHandle(pos=pos, center=center, item=item, name=name, index=index)
         pos = Point(pos)
         center = Point(center)
         if pos[0] != center[0] and pos[1] != center[1]:
@@ -517,11 +551,17 @@ class ROI(GraphicsObject):
                             getLocalHandlePositions and getSceneHandlePositions.
         =================== ====================================================
         """
+        for link_roi in self.linked_rois:
+            link_roi.addRotateFreeHandle(pos=pos, center=center, item=item, name=name, index=index)
         pos = Point(pos)
         center = Point(center)
         return self.addHandle({'name': name, 'type': 'rf', 'center': center, 'pos': pos, 'item': item}, index=index)
 
     def addHandle(self, info, index=None):
+        # handles_to_link = []
+        # for link_roi in self.linked_rois:
+        #     h_link = link_roi.addHandle(info=info, index=index)
+        #     handles_to_link.append(h_link)
         ## If a Handle was not supplied, create it now
         if 'item' not in info or info['item'] is None:
             h = Handle(self.handleSize, typ=info['type'], pen=self.handlePen, invisible=self.invisible_handle,
@@ -533,6 +573,8 @@ class ROI(GraphicsObject):
             h = info['item']
             if info['pos'] is None:
                 info['pos'] = h.pos()
+        # for handle_to_link in handles_to_link:
+        #     h.add_handle_to_link(handle_to_link=handle_to_link)
 
         ## connect the handle to this ROI
         # iid = len(self.handles)
@@ -571,6 +613,9 @@ class ROI(GraphicsObject):
             self.scene().removeItem(handle)
         self.stateChanged()
 
+        for link_roi in self.linked_rois:
+            link_roi.removeHandle(handle=handle)
+
     def replaceHandle(self, oldHandle, newHandle):
         """Replace one handle in the ROI for another. This is useful when
         connecting multiple ROIs together.
@@ -583,6 +628,9 @@ class ROI(GraphicsObject):
         info['item'] = newHandle
         info['pos'] = newHandle.pos()
         self.addHandle(info, index=index)
+
+        for link_roi in self.linked_rois:
+            link_roi.replaceHandle(oldHandle, newHandle)
 
     def checkRemoveHandle(self, handle):
         ## This is used when displaying a Handle's context menu to determine
@@ -706,6 +754,9 @@ class ROI(GraphicsObject):
         QtCore.QTimer.singleShot(0, lambda: self.sigRemoveRequested.emit(self))
 
     def mouseDragEvent(self, ev):
+        for link_roi in self.linked_rois:
+            link_roi.mouseDragEvent(ev)
+
         if ev.isStart():
             # p = ev.pos()
             # if not self.isMoving and not self.shape().contains(p):
@@ -736,20 +787,28 @@ class ROI(GraphicsObject):
 
     def mouseClickEvent(self, ev):
         if ev.button() == QtCore.Qt.RightButton and self.isMoving:
+            for link_roi in self.linked_rois:
+                link_roi.mouseClickEvent(ev)
             ev.accept()
             self.cancelMove()
         if ev.button() == QtCore.Qt.RightButton and self.contextMenuEnabled():
             self.raiseContextMenu(ev)
             ev.accept()
         elif int(ev.button() & self.acceptedMouseButtons()) > 0:
+            for link_roi in self.linked_rois:
+                link_roi.mouseClickEvent(ev)
             ev.accept()
             self.sigClicked.emit(self, ev)
         else:
+            for link_roi in self.linked_rois:
+                link_roi.mouseClickEvent(ev)
             ev.ignore()
 
     def cancelMove(self):
         self.isMoving = False
         self.setState(self.preMoveState)
+        for link_roi in self.linked_rois:
+            link_roi.cancelMove()
 
     def checkPointMove(self, handle, pos, modifiers):
         """When handles move, they must ask the ROI if the move is acceptable.
@@ -1273,7 +1332,8 @@ class Handle(UIGraphicsItem):
     sigClicked = QtCore.Signal(object, object)  # self, event
     sigRemoveRequested = QtCore.Signal(object)  # self
 
-    def __init__(self, radius, typ=None, pen=(200, 200, 220), invisible=False, movable=True, parent=None, deletable=False):
+    def __init__(self, radius, typ=None, pen=(200, 200, 220), invisible=False, movable=True, parent=None,
+                 deletable=False):
         # print "   create item with parent", parent
         # self.bounds = QtCore.QRectF(-1e-10, -1e-10, 2e-10, 2e-10)
         # self.setFlags(self.ItemIgnoresTransformations | self.ItemSendsScenePositionChanges)
@@ -1290,6 +1350,8 @@ class Handle(UIGraphicsItem):
         self.sides, self.startAng = self.types[typ]
         self.buildPath()
         self._shape = None
+        # handles that will be linked to this one, if it is modified, they are modified
+        self.linked_handles = []
         if not self.invisible:
             self.menu = self.buildMenu()
 
@@ -1300,6 +1362,11 @@ class Handle(UIGraphicsItem):
             self.setAcceptedMouseButtons(QtCore.Qt.RightButton)
             # self.updateShape()
         self.setZValue(11)
+
+    def add_handle_to_link(self, handle_to_link):
+        # print("Handle add_handle_to_link")
+        if handle_to_link not in self.linked_handles:
+            self.linked_handles.append(handle_to_link)
 
     def connectROI(self, roi):
         ### roi is the "parent" roi, i is the index of the handle in roi.handles
@@ -1347,8 +1414,8 @@ class Handle(UIGraphicsItem):
         # self.currentPen = self.pen
         # self.update()
 
-    def mouseClickEvent(self, ev):
-        if not self.movable:
+    def mouseClickEvent(self, ev, from_link=False):
+        if (not self.movable) and (not from_link):
             return
         ## right-click cancels drag
         if ev.button() == QtCore.Qt.RightButton and self.isMoving:
@@ -1357,6 +1424,8 @@ class Handle(UIGraphicsItem):
             # for r in self.roi:
             # r[0].cancelMove()
             ev.accept()
+            for linked_handle in self.linked_handles:
+                linked_handle.mouseClickEvent(ev=ev, from_link=True)
         elif int(ev.button() & self.acceptedMouseButtons()) > 0:
             ev.accept()
             if ev.button() == QtCore.Qt.RightButton and self.deletable:
@@ -1389,11 +1458,13 @@ class Handle(UIGraphicsItem):
         pos = ev.screenPos()
         menu.popup(QtCore.QPoint(pos.x(), pos.y()))
 
-    def mouseDragEvent(self, ev):
-        if not self.movable:
+    def mouseDragEvent(self, ev, from_link=False):
+        if (not self.movable) and (not from_link):
             return
+
         if ev.button() != QtCore.Qt.LeftButton:
             return
+
         ev.accept()
 
         ## Inform ROIs that a drag is happening
@@ -1413,10 +1484,16 @@ class Handle(UIGraphicsItem):
             self.isMoving = True
             self.startPos = self.scenePos()
             self.cursorOffset = self.scenePos() - ev.buttonDownScenePos()
+            # print(f"mouseDragEvent {self.scenePos()} {from_link}")
 
         if self.isMoving:  ## note: isMoving may become False in mid-drag due to right-click.
             pos = ev.scenePos() + self.cursorOffset
             self.movePoint(pos, ev.modifiers(), finish=False)
+
+        # if from_link:
+        #     print(f"mouseDragEvent from_link")
+        for linked_handle in self.linked_handles:
+            linked_handle.mouseDragEvent(ev=ev, from_link=True)
 
     def movePoint(self, pos, modifiers=QtCore.Qt.KeyboardModifier(), finish=True):
         for r in self.rois:
@@ -1971,6 +2048,7 @@ class PolyLineROI(ROI):
             h['item'].setDeletable(True)
             h['item'].setAcceptedMouseButtons(h[
                                                   'item'].acceptedMouseButtons() | QtCore.Qt.LeftButton)  ## have these handles take left clicks too, so that handles cannot be added on top of other handles
+        return seg
 
     def setMouseHover(self, hover):
         ## Inform all the ROI's segments that the mouse is(not) hovering over it
@@ -1985,6 +2063,13 @@ class PolyLineROI(ROI):
         return h
 
     def segmentClicked(self, segment, ev=None, pos=None):  ## pos should be in this item's coordinate system
+        # TODO: Fix this
+        # print(f"segment {segment}")
+        # so far doesn't work, because segment doesn't exist when doing self.segments.index(segment)
+        # segment is a l_d_rois._PolyLineSegment object
+        # for linked_roi in self.linked_rois:
+        #     linked_roi.segmentClicked(segment=segment, ev=ev, pos=pos)
+
         if ev != None:
             pos = segment.mapToParent(ev.pos())
         elif pos != None:
@@ -1995,9 +2080,12 @@ class PolyLineROI(ROI):
         h2 = segment.handles[1]['item']
 
         i = self.segments.index(segment)
-        h3 = self.addFreeHandle(pos, index=self.indexOfHandle(h2))
-        self.addSegment(h3, h2, index=i + 1)
-        segment.replaceHandle(h2, h3)
+        new_handle = self.addFreeHandle(pos, index=self.indexOfHandle(h2))
+        new_segment = self.addSegment(new_handle, h2, index=i + 1)
+        segment.replaceHandle(h2, new_handle)
+
+        return new_segment, new_handle
+
 
     def removeHandle(self, handle, updateSegments=True):
         ROI.removeHandle(self, handle)
