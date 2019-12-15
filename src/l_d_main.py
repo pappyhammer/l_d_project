@@ -103,6 +103,51 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
     return results_dict
 
 
+class RoisManager:
+
+    def __init__(self, rois_id, n_displays):
+        # rois_id: tuple of strings
+        # each roi has a cell_id
+        rois_by_layer_dict = dict()
+        # how many displays, one will have modifiable ROIs, the others will be link to the modifiable one
+        self.n_displays = n_displays
+        self.rois_id = rois_id
+
+    def get_pg_rois(self, display_index):
+        # return pyqtgraph rois, original one or copies that are linked and non modifiables
+        # display_index 0 is the modifiable one
+        pass
+
+    def load_rois_coordinates_from_masks(self, mask_imgs):
+        # rois c
+        for layer, mask_img in enumerate(mask_imgs):
+            contours = get_contours_from_mask_img(mask_img = mask_img)
+            # now we want to create rois
+            print(f"contours len {len(contours)}")
+            print(f"contours {contours}")
+
+    def _initiate_cells_id(self):
+        # from laoded masks, determine how many cells are present and give an cell_id to each mask
+        pass
+
+    def load_pre_computed_coordinates(self, file_name):
+        pass
+
+    def delete_roi(self):
+        pass
+
+    def fusion_rois(self):
+        pass
+
+    def get_cells_id(self):
+        # return list of cell ids
+        pass
+
+    def get_cell_id_contours(self):
+        # return a list of coords, as many as layers
+        pass
+
+
 class MainWindow(QMainWindow):
     """Main window of the Exploratory GUI"""
     def __init__(self):
@@ -544,7 +589,7 @@ class CentralWidget(QWidget):
         super().__init__(parent=main_window)
 
         root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-        root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+        # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
 
         result_path = os.path.join(root_path, "results_ld")
 
@@ -552,11 +597,13 @@ class CentralWidget(QWidget):
         red_dir_path = os.path.join(root_path, "cellules (red)")
         cfos_dir_path = os.path.join(root_path, "cfos (green)")
 
-        tiffs_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path, mask_dir_path=mask_dir_path)
+        self.images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path, mask_dir_path=mask_dir_path)
         # raise Exception("KING IN THE NORTH")
 
         # Enable antialiasing for prettier plots
         pg.setConfigOptions(antialias=True)
+
+        self.rois_manager_dict = dict()
 
         self.current_layer = 0
 
@@ -564,23 +611,23 @@ class CentralWidget(QWidget):
 
         self.grid_layout = QGridLayout()
 
-        cells_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=tiffs_dict, key_image="red",
+        cells_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="red",
                                               id_widget="red", main_window=main_window)
         self.grid_layout.addWidget(cells_widget, 0, 0)
 
-        cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=tiffs_dict, key_image="cfos",
+        cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="cfos",
                                               id_widget="cfos", main_window=main_window)
         self.grid_layout.addWidget(cfos_widget, 0, 1)
 
         cfos_widget.link_to_view(view=cells_widget.view)
 
-        mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=tiffs_dict, key_image="mask",
+        mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="mask",
                                               id_widget="mask", main_window=main_window)
         self.grid_layout.addWidget(mask_widget, 1, 0)
 
         mask_widget.link_to_view(view=cells_widget.view)
 
-        overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=tiffs_dict, key_image="red",
+        overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict, key_image="red",
                                               id_widget="red_bis", main_window=main_window)
 
         overlap_widget.link_to_view(view=cells_widget.view)
@@ -610,7 +657,7 @@ class CentralWidget(QWidget):
 
         self.glue_layout = QHBoxLayout()
         self.combo_box_layout = QVBoxLayout()
-        self.combo_box = ComboBoxWidget(choices=tiffs_dict, ending_keys=["red", "cfos", "mask"],
+        self.combo_box = ComboBoxWidget(choices=self.images_dict, ending_keys=["red", "cfos", "mask"],
                                         parent=self)
         self.combo_box_layout.addWidget(self.combo_box)
         self.display_button = QPushButton("Display", self)
@@ -662,9 +709,20 @@ class CentralWidget(QWidget):
             self.current_layer -= 1
             self.layer_spin_box.setValue(self.current_layer)
 
+    def _get_rois_manager(self, image_keys):
+        if image_keys not in self.rois_manager_dict:
+            roi_manager = RoisManager(rois_id=image_keys, n_displays=3)
+            self.rois_manager_dict[image_keys] = roi_manager
+            # if not yet created, then we load the rois from the mask data
+            data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
+            mask_imgs = get_image_from_tiff(file_name=data_dict["mask"])
+            roi_manager.load_rois_coordinates_from_masks(mask_imgs=mask_imgs)
+
+        return self.rois_manager_dict[image_keys]
+
     def display_selected_field(self):
         image_keys = self.combo_box.get_value()
-
+        self._get_rois_manager(tuple(image_keys))
         # print(f"image_keys {image_keys}")
         for cells_display_widget in self.cells_display_widgets:
             cells_display_widget.set_images(image_keys)
@@ -687,6 +745,7 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         # dict with: group, f, position, s, depth, key_image
         self.images_dict = images_dict
         self.id_widget = id_widget
+        # ex: cfos, red, mask
         self.last_image_key = key_image
         self.main_window = main_window
 
@@ -698,6 +757,9 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
 
         # different layer
         self.images = None
+
+    def load_contours(self, contours):
+        pass
 
     def set_images(self, image_keys):
         """
@@ -717,11 +779,21 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         self._update_display()
 
     def _update_display(self):
-        image_to_diplay = self.images[self.current_layer]
+        image_to_display = self.images[self.current_layer]
         if self.last_image_key == "mask":
-            image_to_diplay = np.invert(image_to_diplay)
-        #     image_to_diplay = np.reshape(image_to_diplay, (image_to_diplay.shape[0], image_to_diplay.shape[1], 1))
-        self.image_displayed.setImage(image_to_diplay)
+            # otherwise the mask with no cell will be white instead of black
+            if len(np.where(image_to_display == 0)[0]) > 4:
+                image_to_display = np.invert(image_to_display)
+            # print(
+            #     f"image_to_display sum {np.sum(image_to_display)} {image_to_display.shape[0] * image_to_display.shape[1]} "
+            #     f"min {np.min(image_to_display)}, max {np.max(image_to_display)}, "
+            #     f"len(np.where(image_to_display == np.min(image_to_display)[0]) "
+            #     f"{len(np.where(image_to_display == np.min(image_to_display))[0])}, "
+            #     f"len(np.where(image_to_display == np.max(image_to_display)[0]) "
+            #     f"{len(np.where(image_to_display == np.max(image_to_display))[0])}")
+
+        #     image_to_display = np.reshape(image_to_display, (image_to_display.shape[0], image_to_display.shape[1], 1))
+        self.image_displayed.setImage(image_to_display)
 
     def keyPressEvent(self, event):
         """
@@ -740,11 +812,36 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         self.view.setXLink(view=view)
         self.view.setYLink(view=view)
 
+
 def get_data_in_dict_from_keys(list_keys, data_dict):
     if len(list_keys) > 0:
         return get_data_in_dict_from_keys(list_keys[1:], data_dict[list_keys[0]])
     return data_dict
 
+
+def get_contours_from_mask_img(mask_img):
+    """
+
+    :param mask_img:
+    :return: contours as a list of n_cells list, each following list containt paris of int representing xy coords
+    """
+    mask_with_contours = mask_img.copy()
+    if len(mask_with_contours.shape) < 3:
+        mask_with_contours = np.reshape(mask_with_contours, (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
+    # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) #
+    contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    coord_contours = []
+    for contour in contours:
+        xy = []
+        for c in contour:
+            xy.append([c[0][0], c[0][1]])
+        # removing the contour that take all the frame
+        if [0, 0] in xy:
+            continue
+        coord_contours.append(xy)
+
+    return coord_contours
 
 class PlanMask:
 
