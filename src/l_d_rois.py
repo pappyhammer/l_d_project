@@ -116,9 +116,10 @@ class ROI(GraphicsObject):
     sigClicked = QtCore.Signal(object, object)
     sigRemoveRequested = QtCore.Signal(object)
     # size=Point(1, 1)
-    def __init__(self, pos, size,  config_widget, angle=0.0, invertible=False, maxBounds=None, snapSize=1.0,
+    def __init__(self, pos, size,  roi_manager, angle=0.0, invertible=False, maxBounds=None, snapSize=1.0,
                  scaleSnap=False, translateSnap=False, rotateSnap=False, parent=None, pen=None, movable=True,
-                 removable=False, invisible_handle=False, alterable=True, no_seq_hover_action=False, roi_id=None
+                 removable=True, invisible_handle=False, alterable=True, no_seq_hover_action=False, roi_id=None,
+                 layer_index=None
                  ):
         # QObjectWorkaround.__init__(self)
         GraphicsObject.__init__(self, parent)
@@ -136,9 +137,12 @@ class ROI(GraphicsObject):
         self.invisible_handle = invisible_handle
         self.alterable = alterable
         self.no_seq_hover_action = no_seq_hover_action
+        # Roi id, should be the same as the ROI with which is linked
         self.roi_id = roi_id
-        # allows to get self.config_widget.rois_display to know if they should be displayed
-        self.config_widget = config_widget
+        # indicate the layer in which this ROI is displayed
+        self.layer_index = layer_index
+        # Instance of RoiManager in fact
+        self.roi_manager = roi_manager
 
         self.freeHandleMoved = False  ## keep track of whether free handles have moved since last change signal was emitted.
         self.mouseHovering = False
@@ -752,6 +756,7 @@ class ROI(GraphicsObject):
     def removeClicked(self):
         ## Send remove event only after we have exited the menu event handler
         QtCore.QTimer.singleShot(0, lambda: self.sigRemoveRequested.emit(self))
+        self.roi_manager.remove_roi(roi_id=self.roi_id, layer_index=self.layer_index)
 
     def mouseDragEvent(self, ev):
         for link_roi in self.linked_rois:
@@ -1073,7 +1078,7 @@ class ROI(GraphicsObject):
         return QtCore.QRectF(0, 0, self.state['size'][0], self.state['size'][1]).normalized()
 
     def paint(self, p, opt, widget):
-        if not self.config_widget.display_rois:
+        if not self.roi_manager.display_rois:
             return
         # p.save()
         # Note: don't use self.boundingRect here, because subclasses may need to redefine it.
@@ -1982,6 +1987,9 @@ class PolyLineROI(ROI):
 
         self.closed = closed
         self.segments = []
+        # used to give a unique index to each segment
+        self.n_segments_created = 0
+        self.segments_by_id = dict()
         ROI.__init__(self, pos, size=[1, 1], **args)
 
         self.setPoints(positions)
@@ -2035,8 +2043,13 @@ class PolyLineROI(ROI):
         self.setPoints(state['points'], closed=state['closed'])
 
     def addSegment(self, h1, h2, index=None):
+        segment_id = self.n_segments_created
+        self.n_segments_created += 1
         seg = _PolyLineSegment(handles=(h1, h2), pen=self.pen, parent=self, movable=False,
-                               no_seq_hover_action=self.no_seq_hover_action, config_widget=self.config_widget)
+                               no_seq_hover_action=self.no_seq_hover_action, roi_manager=self.roi_manager,
+                               segment_id=segment_id)
+        # thanks to this dict we are able to get the same segment from the linked ROIs
+        self.segments_by_id[segment_id] = seg
         if index is None:
             self.segments.append(seg)
         else:
@@ -2076,6 +2089,36 @@ class PolyLineROI(ROI):
             pos = pos
         else:
             raise Exception("Either an event or a position must be given.")
+
+        segment_id = segment.segment_id
+        handles_to_link = []
+        for linked_roi in self.linked_rois:
+            other_segment, other_handle = linked_roi.segment_clicked_using_id(segment_id=segment_id, pos=pos)
+            handles_to_link.append(other_handle)
+
+        h1 = segment.handles[0]['item']
+        h2 = segment.handles[1]['item']
+
+        i = self.segments.index(segment)
+        new_handle = self.addFreeHandle(pos, index=self.indexOfHandle(h2))
+        new_segment = self.addSegment(new_handle, h2, index=i + 1)
+        segment.replaceHandle(h2, new_handle)
+
+        for handle_to_link in handles_to_link:
+            new_handle.add_handle_to_link(handle_to_link=handle_to_link)
+
+        return new_segment, new_handle
+
+    def segment_clicked_using_id(self, segment_id, pos):
+        """
+        Call by a link Roi, to do the same action as
+        Args:
+            segment_id:
+
+        Returns:
+
+        """
+        segment = self.segments_by_id[segment_id]
         h1 = segment.handles[0]['item']
         h2 = segment.handles[1]['item']
 
@@ -2085,7 +2128,6 @@ class PolyLineROI(ROI):
         segment.replaceHandle(h2, new_handle)
 
         return new_segment, new_handle
-
 
     def removeHandle(self, handle, updateSegments=True):
         ROI.removeHandle(self, handle)
@@ -2179,7 +2221,7 @@ class LineSegmentROI(ROI):
     ============== =============================================================
     """
 
-    def __init__(self, positions=(None, None), pos=None, handles=(None, None), **args):
+    def __init__(self, positions=(None, None), pos=None, handles=(None, None), segment_id=None,  **args):
         if pos is None:
             pos = [0, 0]
 
@@ -2187,7 +2229,7 @@ class LineSegmentROI(ROI):
         # ROI.__init__(self, positions[0])
         if len(positions) > 2:
             raise Exception("LineSegmentROI must be defined by exactly 2 positions. For more points, use PolyLineROI.")
-
+        self.segment_id = segment_id
         for i, p in enumerate(positions):
             self.addFreeHandle(p, item=handles[i])
 
@@ -2195,7 +2237,7 @@ class LineSegmentROI(ROI):
         return [p['item'].pos() for p in self.handles]
 
     def paint(self, p, *args):
-        if not self.config_widget.display_rois:
+        if not self.roi_manager.display_rois:
             # print("paint in LineSegmentROI")
             return
         p.setRenderHint(QtGui.QPainter.Antialiasing)

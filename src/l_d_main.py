@@ -44,6 +44,7 @@ def get_image_from_tiff(file_name):
     # print(f"layer_data.shape {layer_data.shape}, np.max {np.max(layer_data)}, np.min{np.max(layer_data)}")
     return layer_data
 
+
 def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
     """
     Return a dict with: group, f, position, s, depth
@@ -113,7 +114,7 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
 
 class RoisManager:
 
-    def __init__(self, rois_manager_id, n_displays, cells_display_keys):
+    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict):
 
         # each roi has a cell_id
         self.rois_by_layer_dict = dict()
@@ -121,10 +122,14 @@ class RoisManager:
         self.n_displays = n_displays
         # rois_id: tuple of strings
         self.rois_manager_id = rois_manager_id
+        # first one is for the mask
         self.cells_display_keys = cells_display_keys
-
+        # contains the instance of CellsDisplayMainWidget
+        self.cells_display_dict = cells_display_dict
         # there because of PolyLineRoi instances
         self.display_rois = True
+        # to keep them unique
+        self.individual_roi_id = 0
 
     def get_pg_rois(self, cells_display_key, layer_index):
         """
@@ -136,9 +141,50 @@ class RoisManager:
 
         return self.rois_by_layer_dict[layer_index][cells_display_key]
 
+    def remove_roi(self, roi_id, layer_index):
+        """
+
+        Args:
+            roi_id:
+            layer_index:
+
+        Returns:
+
+        """
+        for cells_diplay_key, rois_list in self.rois_by_layer_dict[layer_index].items():
+            new_rois = []
+            for pg_roi in rois_list:
+                if pg_roi.roi_id == roi_id:
+                    # we need to remove it from the display
+                    self.cells_display_dict[cells_diplay_key].remove_pg_roi(pg_roi)
+                    continue
+                new_rois.append(pg_roi)
+            self.rois_by_layer_dict[layer_index][cells_diplay_key] = new_rois
+
+    def add_pg_roi(self, contours, layer, add_to_cells_display=True):
+        display_id = 0
+        main_roi = PolyLineROI(contours, pen=(6, 9), closed=True, movable=True,
+                               invisible_handle=False, alterable=True, no_seq_hover_action=False,
+                               roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
+        if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
+            self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
+        self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
+        if add_to_cells_display:
+            self.cells_display_dict[self.cells_display_keys[display_id]].add_pg_roi(main_roi)
+        for display_id in np.arange(1, self.n_displays):
+            other_roi = PolyLineROI(contours, pen=(6, 9), closed=True, movable=False,
+                                    invisible_handle=False, alterable=False, no_seq_hover_action=True,
+                                    roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
+            main_roi.link_a_roi(roi_to_link=other_roi)
+            if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
+                self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
+            self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(other_roi)
+            if add_to_cells_display:
+                self.cells_display_dict[self.cells_display_keys[display_id]].add_pg_roi(other_roi)
+        self.individual_roi_id += 1
+
     def load_rois_coordinates_from_masks(self, mask_imgs):
         # rois c
-        individual_roi_id = 0
         for layer, mask_img in enumerate(mask_imgs):
 
             self.rois_by_layer_dict[layer] = dict()
@@ -148,19 +194,19 @@ class RoisManager:
                 display_id = 0
                 main_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=True,
                                        invisible_handle=False, alterable=True, no_seq_hover_action=False,
-                                       roi_id=individual_roi_id, config_widget=self)
+                                       roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
                 if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
                     self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
                 self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
                 for display_id in np.arange(1, self.n_displays):
                     other_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=False,
                                             invisible_handle=False, alterable=False, no_seq_hover_action=True,
-                                            roi_id=individual_roi_id, config_widget=self)
+                                            roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
                     main_roi.link_a_roi(roi_to_link=other_roi)
                     if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
                         self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
                     self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(other_roi)
-                individual_roi_id += 1
+                self.individual_roi_id += 1
 
             # now we want to create rois
             # print(f"contours len {len(contours)}")
@@ -171,9 +217,6 @@ class RoisManager:
         pass
 
     def load_pre_computed_coordinates(self, file_name):
-        pass
-
-    def delete_roi(self):
         pass
 
     def fusion_rois(self):
@@ -237,6 +280,7 @@ class MainWindow(QMainWindow):
         #     self.central_widget.previous_timestamp()
         # if event.key() == QtCore.Qt.Key_Right:
         #     self.central_widget.next_timestamp()
+
 
 class MyQComboBox(QComboBox):
     """
@@ -647,28 +691,36 @@ class CentralWidget(QWidget):
 
         self.current_layer = 0
 
+        self.n_layers = 8
+
         self.main_layout = QHBoxLayout()
 
         self.grid_layout = QGridLayout()
 
         self.cells_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
-                                                   key_image="red",
-                                              id_widget="red", main_window=main_window)
+                                                   key_image="red", central_widget=self,
+                                                   id_widget="red", main_window=main_window)
         self.grid_layout.addWidget(self.cells_widget, 0, 0)
 
         self.cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
-                                                  key_image="cfos",
+                                                  key_image="cfos", central_widget=self,
                                               id_widget="cfos", main_window=main_window)
         self.grid_layout.addWidget(self.cfos_widget, 0, 1)
 
         self.cfos_widget.link_to_view(view=self.cells_widget.view)
 
         self.mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
-                                                  key_image="mask",
+                                                  key_image="mask", central_widget=self,
                                               id_widget="mask", main_window=main_window)
         self.grid_layout.addWidget(self.mask_widget, 1, 0)
 
         self.mask_widget.link_to_view(view=self.cells_widget.view)
+
+        self.z_view_widget = ZViewWidget(n_layers=self.n_layers, current_layer=self.current_layer,
+                                         main_window=main_window, width_image=500, parent=self)
+        self.z_view_widget.link_to_view(view=self.cells_widget.view)
+        self.grid_layout.addWidget(self.z_view_widget, 1, 1)
+        self.z_view_widget.link_to_view(view=self.cells_widget.view)
 
         # self.overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
         #                                         key_image="red",
@@ -678,6 +730,8 @@ class CentralWidget(QWidget):
         # self.grid_layout.addWidget(self.overlap_widget, 1, 1)
         # , self.overlap_widget
         self.cells_display_widgets = [self.cells_widget, self.cfos_widget, self.mask_widget]
+        self.cells_display_widgets_dict = {"red": self.cells_widget, "cfos": self.cfos_widget,
+                                           "mask": self.mask_widget}
 
         self.main_layout.addLayout(self.grid_layout)
 
@@ -733,6 +787,17 @@ class CentralWidget(QWidget):
             cells_display_widget.set_layer(self.current_layer)
         # print(f"layer_value_changed {value}")
 
+    def add_pg_roi(self, pos, image_keys):
+        roi_manager = self.rois_manager_dict[tuple(image_keys)]
+        size_half_square = 5
+        contours = list()
+        contours.append([pos[0]-size_half_square, pos[1]+size_half_square])
+        contours.append([pos[0]+size_half_square, pos[1]+size_half_square])
+        contours.append([pos[0]+size_half_square, pos[1]-size_half_square])
+        contours.append([pos[0]-size_half_square, pos[1]-size_half_square])
+
+        roi_manager.add_pg_roi(contours=contours, layer=self.current_layer)
+
     def change_layer(self, increment):
         """
                 increment or decrement layer
@@ -756,7 +821,9 @@ class CentralWidget(QWidget):
     def _get_rois_manager(self, image_keys):
         if image_keys not in self.rois_manager_dict:
             cells_display_keys = ["mask", "red", "cfos"]
-            roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3, cells_display_keys=cells_display_keys)
+            roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
+                                      cells_display_keys=cells_display_keys,
+                                      cells_display_dict=self.cells_display_widgets_dict)
             self.rois_manager_dict[image_keys] = roi_manager
             # if not yet created, then we load the rois from the mask data
             data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
@@ -773,12 +840,87 @@ class CentralWidget(QWidget):
             cells_display_widget.set_images(image_keys, roi_manager)
 
 
+class MyViewBox(pg.ViewBox):
+    """
+    Mixed between RectMode and PanMode.
+    Left click drag act like in RectMode
+    Right click drag act life left click will act in PanMode (move the view box)
+    Allow to zoom.
+    Code from pyqtgraph examples
+    """
+
+    def __init__(self, *args, **kwds):
+        pg.ViewBox.__init__(self, *args, **kwds)
+        # self.setMouseMode(self.RectMode) ViewBox.PanMode
+
+    def mouseClickEvent(self, ev):
+        pass
+        ## reimplement right-click to zoom out
+        # if ev.button() == QtCore.Qt.RightButton:
+        #     self.autoRange()
+
+    def mouseDragEvent(self, ev):
+        """
+        Right click is used to zoom, left click is use to move the area
+        Args:
+            ev:
+
+        Returns:
+
+        """
+        if ev.button() == QtCore.Qt.RightButton:
+            self.setMouseMode(self.PanMode)
+            # cheating, by telling it the left button is used instead
+            ev._buttons = [QtCore.Qt.LeftButton]
+            ev._button = QtCore.Qt.LeftButton
+            pg.ViewBox.mouseDragEvent(self, ev)
+        elif ev.button() == QtCore.Qt.LeftButton:
+            self.setMouseMode(self.RectMode)
+            pg.ViewBox.mouseDragEvent(self, ev)
+        else:
+            # ev.ignore()
+            pg.ViewBox.mouseDragEvent(self, ev)
+
+
+class ZViewWidget(pg.PlotWidget):
+
+    def __init__(self, n_layers, current_layer,  main_window, width_image, parent):
+
+        self.view_box = MyViewBox()
+
+        pg.PlotWidget.__init__(self, parent=parent, viewBox=self.view_box)
+
+        self.current_layer = current_layer
+        self.n_layers = n_layers
+        self.main_window = main_window
+
+        self.pg_plot = self.getPlotItem()
+
+        # self.pg_plot.hideAxis(axis='left')
+
+        self.pg_plot.hideAxis(axis='bottom')
+
+        self.view_box.setLimits(xMin=0, xMax=width_image, yMin=-1, yMax=self.n_layers)
+        self.pg_plot.setXRange(0, width_image)
+        self.pg_plot.setYRange(0, self.n_layers-1)
+
+        self.pg_plot.setAspectLocked(False)
+
+        color_pen = (0, 0, 255)
+        self.current_layer_marker = pg.InfiniteLine(pos=[0, self.current_layer], angle=0,
+                                                    pen=color_pen, movable=False,)
+        self.pg_plot.addItem(item=self.current_layer_marker)
+
+    def link_to_view(self, view):
+        # TODO: see to fix it
+        self.view_box.setXLink(view=view)
+
 class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
     """
     Module that will display the different w intervals along the frames
     """
 
-    def __init__(self, id_widget, current_z, images_dict, key_image, main_window, parent=None):
+    def __init__(self, id_widget, current_z, images_dict, key_image, main_window, central_widget, parent=None):
 
         # self.view_box = MyViewBox()
         pg.GraphicsLayoutWidget.__init__(self) # viewBox=self.view_box
@@ -793,6 +935,9 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         # ex: cfos, red, mask
         self.last_image_key = key_image
         self.main_window = main_window
+        self.central_widget = central_widget
+        # list of string representing the images actually displayed
+        self.image_keys = None
 
         self.view = self.addViewBox(lockAspect=True, row=0, col=0, invertY=True, name=f"{id_widget}")
         # view.setMenuEnabled(False)
@@ -811,9 +956,10 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
 
     def set_images(self, image_keys, roi_manager):
         """
-        List of string
+        image_keys: List of string
         """
         self.roi_manager = roi_manager
+        self.image_keys = image_keys
         self._update_pg_rois()
 
         data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
@@ -821,6 +967,20 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         # print(f"key_image {self.last_image_key} {data_dict[self.last_image_key]}")
 
         self._update_display()
+
+    def remove_pg_roi(self, pg_roi):
+        self.view.removeItem(pg_roi)
+
+    def add_pg_roi(self, pg_roi):
+        """
+        Should be called from RoiManager, pg_roi should be registered in the RoiManager
+        Args:
+            pg_roi:
+
+        Returns:
+
+        """
+        self.view.addItem(pg_roi)
 
     def _update_pg_rois(self):
         # pg as pyqtgraph
@@ -856,6 +1016,13 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         # print(f"id_widget {self.id_widget}, image shape {image_to_display.shape}")
         self.image_displayed.setImage(image_to_display)
 
+    def create_new_roi_in_the_middle(self):
+        view_range = self.view.viewRange()
+        # putting the new ROI in the middle
+        pos = [np.mean(view_range[0]), np.mean(view_range[1])]
+        self.central_widget.add_pg_roi(pos=pos, image_keys=self.image_keys)
+
+
     def keyPressEvent(self, event):
         """
         Call when a key is pressed
@@ -865,6 +1032,8 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         Returns:
 
         """
+        if event.key() == QtCore.Qt.Key_R:
+            self.create_new_roi_in_the_middle()
         # Sending the event to the main window if the widget is in the main window
         if self.main_window is not None:
             self.main_window.keyPressEvent(event=event)
