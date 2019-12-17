@@ -913,7 +913,8 @@ class ZViewWidget(pg.PlotWidget):
 
     def link_to_view(self, view):
         # TODO: see to fix it
-        self.view_box.setXLink(view=view)
+        pass
+        # self.view_box.setXLink(view=view)
 
 class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
     """
