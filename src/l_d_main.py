@@ -139,6 +139,8 @@ class RoisManager:
         display_index 0 is the modifiable one
         """
 
+        if layer_index not in self.rois_by_layer_dict:
+            return []
         return self.rois_by_layer_dict[layer_index][cells_display_key]
 
     def remove_roi(self, roi_id, layer_index):
@@ -672,8 +674,8 @@ class CentralWidget(QWidget):
     def __init__(self, main_window):
         super().__init__(parent=main_window)
 
-        # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-        root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+        root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+        # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
 
         result_path = os.path.join(root_path, "results_ld")
 
@@ -691,7 +693,7 @@ class CentralWidget(QWidget):
 
         self.current_layer = 0
 
-        self.n_layers = 8
+        self.n_layers = 7
 
         self.main_layout = QHBoxLayout()
 
@@ -717,10 +719,11 @@ class CentralWidget(QWidget):
         self.mask_widget.link_to_view(view=self.cells_widget.view)
 
         self.z_view_widget = ZViewWidget(n_layers=self.n_layers, current_layer=self.current_layer,
-                                         main_window=main_window, width_image=500, parent=self)
-        self.z_view_widget.link_to_view(view=self.cells_widget.view)
+                                         main_window=main_window, width_image=500, parent=self,
+                                         linked_cells_display_widget=self.cells_widget)
+        self.z_view_widget.link_to_view(view_to_link=self.cells_widget.view)
         self.grid_layout.addWidget(self.z_view_widget, 1, 1)
-        self.z_view_widget.link_to_view(view=self.cells_widget.view)
+        # self.cells_widget.view.sigXRangeChanged.connect(self.z_view_widget.update_region)
 
         # self.overlap_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
         #                                         key_image="red",
@@ -729,7 +732,7 @@ class CentralWidget(QWidget):
         # self.overlap_widget.link_to_view(view=self.cells_widget.view)
         # self.grid_layout.addWidget(self.overlap_widget, 1, 1)
         # , self.overlap_widget
-        self.cells_display_widgets = [self.cells_widget, self.cfos_widget, self.mask_widget]
+        self.cells_display_widgets = [self.cells_widget, self.cfos_widget, self.mask_widget, self.z_view_widget]
         self.cells_display_widgets_dict = {"red": self.cells_widget, "cfos": self.cfos_widget,
                                            "mask": self.mask_widget}
 
@@ -884,15 +887,24 @@ class MyViewBox(pg.ViewBox):
 
 class ZViewWidget(pg.PlotWidget):
 
-    def __init__(self, n_layers, current_layer,  main_window, width_image, parent):
+    def __init__(self, n_layers, current_layer,  main_window, width_image, parent, linked_cells_display_widget):
 
         self.view_box = MyViewBox()
 
         pg.PlotWidget.__init__(self, parent=parent, viewBox=self.view_box)
 
+        # to update x range
+        self.linked_cells_display_widget = linked_cells_display_widget
         self.current_layer = current_layer
         self.n_layers = n_layers
         self.main_window = main_window
+
+        self.roi_manager = None
+        self.image_keys = None
+        # key is the id of the xy ROI,
+        self.line_segments_rois = dict()
+        # key is the id of xy ROI
+        self.layer_rois = dict()
 
         self.pg_plot = self.getPlotItem()
 
@@ -904,17 +916,93 @@ class ZViewWidget(pg.PlotWidget):
         self.pg_plot.setXRange(0, width_image)
         self.pg_plot.setYRange(0, self.n_layers-1)
 
-        self.pg_plot.setAspectLocked(False)
+        self.pg_plot.setAspectLocked(True)
 
         color_pen = (0, 0, 255)
         self.current_layer_marker = pg.InfiniteLine(pos=[0, self.current_layer], angle=0,
-                                                    pen=color_pen, movable=False,)
+                                                    pen=color_pen, movable=False)
         self.pg_plot.addItem(item=self.current_layer_marker)
 
-    def link_to_view(self, view):
-        # TODO: see to fix it
+        # test_line = pg.InfiniteLine(pos=[100, 0], angle=90,
+        #                                             pen=color_pen, movable=False)
+        # self.pg_plot.addItem(item=test_line)
+
+    def set_layer(self, layer):
+        # not used, but necessary
         pass
-        # self.view_box.setXLink(view=view)
+
+    def change_x_range(self, range_values):
+        self.pg_plot.setXRange(range_values[0], range_values[1])
+
+    def update_region(self):
+        # print("z_stack update_region")
+        new_view_range = self.linked_cells_display_widget.view.viewRange()
+        actual_view_range = self.pg_plot.view_box.viewRange()
+        if (new_view_range[0][0] != actual_view_range[0][0]) or (new_view_range[0][1] != actual_view_range[0][1]):
+            self.pg_plot.setXRange(new_view_range[0][0], new_view_range[0][1], padding=0)
+        # print(f"z_stack view_range {view_range}")
+
+    def set_images(self, image_keys, roi_manager):
+        """
+        image_keys: List of string
+        """
+        self.roi_manager = roi_manager
+        self.image_keys = image_keys
+        self._update_pg_rois()
+
+        # data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
+        # self.images = get_image_from_tiff(file_name=data_dict[self.id_widget])
+        # # print(f"key_image {self.last_image_key} {data_dict[self.last_image_key]}")
+        #
+        # self._update_display()
+
+    def _update_pg_rois(self):
+        """
+        Get all pg rois from roi_manager and create LineSegmentROI in each layer to represent them
+        :return:
+        """
+        # pg as pyqtgraph
+        old_line_segments_rois = self.line_segments_rois
+        self.line_segments_rois = dict()
+        self.layer_rois = dict()
+        for layer in np.arange(0, self.n_layers):
+            new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key="mask", layer_index=layer)
+            if len(old_line_segments_rois) > 0:
+                for line_roi in old_line_segments_rois.values():
+                    self.view.removeItem(line_roi)
+            for pg_roi in new_pg_rois:
+                self.update_associated_line(pg_roi, layer)
+
+
+    def update_associated_line(self, pg_roi, layer):
+        """
+        Update the line associated to this pg_roi. If line doesn't exists, it is created
+        :param pg_roi:
+        :return:
+        """
+        pass
+        # print(f"pg_roi.boundingRect {pg_roi.boundingRect().getCoords()}")
+
+        # getCoords:  position of the rectangle's top-left and bottom-right corner
+        rect_coords = pg_roi.boundingRect().getCoords()
+        left_x = rect_coords[0]
+        right_x = rect_coords[2]
+        line_sgt = pg.LineSegmentROI([[left_x, layer], [right_x, layer]], pen='r')
+        self.pg_plot.addItem(line_sgt)
+        self.line_segments_rois[pg_roi.roi_id] = line_sgt
+        self.layer_rois[pg_roi.roi_id] = layer
+
+    def delete_associated_line(self, pg_roi, layer):
+        """
+        Delete the line associated to it
+        :param pg_roi:
+        :return:
+        """
+        pass
+
+    def link_to_view(self, view_to_link):
+        self.view_box.setXLink(view=view_to_link)
+
 
 class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
     """
@@ -1142,7 +1230,7 @@ class PlanMask:
 
 def main():
     root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-    root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+    # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
     result_path = os.path.join(root_path, "results_ld")
 
     masks_path = os.path.join(root_path, "masques")
