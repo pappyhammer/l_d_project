@@ -116,7 +116,7 @@ class ROI(GraphicsObject):
     sigClicked = QtCore.Signal(object, object)
     sigRemoveRequested = QtCore.Signal(object)
     # size=Point(1, 1)
-    def __init__(self, pos, size,  roi_manager, angle=0.0, invertible=False, maxBounds=None, snapSize=1.0,
+    def __init__(self, pos, size, roi_manager, angle=0.0, invertible=False, maxBounds=None, snapSize=1.0,
                  scaleSnap=False, translateSnap=False, rotateSnap=False, parent=None, pen=None, movable=True,
                  removable=True, invisible_handle=False, alterable=True, no_seq_hover_action=False, roi_id=None,
                  layer_index=None
@@ -367,7 +367,9 @@ class ROI(GraphicsObject):
         # if 'update' not in kargs or kargs['update'] is True:
         # self.stateChanged()
         for link_roi in self.linked_rois:
-            link_roi.translate(*args, **kargs)
+            link_roi.translate(*args, **kargs, from_linked_roi=True)
+        if "from_linked_roi" not in kargs:
+            self.roi_manager.roi_updated(pg_roi=self)
 
     def rotate(self, angle, update=True, finish=True):
         """
@@ -1009,6 +1011,9 @@ class ROI(GraphicsObject):
             self.setState(newState, update=False)
 
         self.stateChanged(finish=finish)
+
+        if self.alterable:
+            self.roi_manager.roi_updated(pg_roi=self)
 
     def stateChanged(self, finish=True):
         """Process changes to the state of the ROI.

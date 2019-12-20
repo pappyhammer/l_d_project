@@ -114,10 +114,11 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
 
 class RoisManager:
 
-    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, n_layers=6):
+    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, z_view_widget, n_layers=6):
 
         # each roi has a cell_id
         self.rois_by_layer_dict = dict()
+        self.z_view_widget = z_view_widget
         # how many displays, one will have modifiable ROIs, the others will be link to the modifiable one
         self.n_displays = n_displays
         # rois_id: tuple of strings
@@ -166,6 +167,19 @@ class RoisManager:
                     continue
                 new_rois.append(pg_roi)
             self.rois_by_layer_dict[layer_index][cells_diplay_key] = new_rois
+        self.z_view_widget.delete_associated_line(roi_id=roi_id)
+
+    def roi_updated(self, pg_roi):
+        """
+        Called when a roi has been updated (change of handle or moved)
+        If ROis has been removed, the method remove_roi() should be called instead
+        :param pg_roi:
+        :return:
+        """
+        print(f"roi_updated pg_roi {pg_roi.roi_id}")
+        if pg_roi.roi_id is None:
+            return
+        self.z_view_widget.update_associated_line(pg_roi=pg_roi, layer=None)
 
     def are_rois_loaded(self):
         return len(self.rois_by_layer_dict) > 0
@@ -175,6 +189,7 @@ class RoisManager:
         main_roi = PolyLineROI(contours, pen=(6, 9), closed=True, movable=True,
                                invisible_handle=False, alterable=True, no_seq_hover_action=False,
                                roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
+        self.z_view_widget.update_associated_line(pg_roi=main_roi, layer=layer)
         if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
             self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
         self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
@@ -572,7 +587,7 @@ class ComboBoxWidget(MyQFrame):
         for combo_box in self.combo_boxes:
             for index_combo_box in range(combo_box.count()):
                 image_keys = combo_box.get_previous_combo_boxes_content(index_combo_box)
-                print(f"update_combo_boxes_status image_keys {image_keys}")
+
                 status_color = self.status_color_fct(image_keys)
                 combo_box.setItemIcon(index_combo_box, get_icon_from_color(status_color))
 
@@ -836,8 +851,9 @@ class CentralWidget(QWidget):
             if image_keys in self.rois_manager_dict:
                 continue
             roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
-                                          cells_display_keys=cells_display_keys,
-                                          cells_display_dict=self.cells_display_widgets_dict)
+                                      z_view_widget=self.z_view_widget,
+                                      cells_display_keys=cells_display_keys,
+                                      cells_display_dict=self.cells_display_widgets_dict)
             self.rois_manager_dict[image_keys] = roi_manager
 
         self.control_panel_layout = QVBoxLayout()
@@ -869,6 +885,17 @@ class CentralWidget(QWidget):
         self.display_button.setToolTip("Display the selected field")
         self.display_button.clicked.connect(self.display_selected_field)
         self.combo_box_layout.addWidget(self.display_button)
+
+        self.save_rois_button = QPushButton("Save ROIs", self)
+        self.save_rois_button.setToolTip("Save ROIs that has been checked in a file")
+        self.save_rois_button.clicked.connect(self.save_rois)
+        self.combo_box_layout.addWidget(self.save_rois_button)
+
+        self.load_rois_button = QPushButton("Load ROIs", self)
+        self.load_rois_button.setToolTip("Load ROIs from file")
+        self.load_rois_button.clicked.connect(self.load_rois)
+        self.combo_box_layout.addWidget(self.load_rois_button)
+
         self.combo_box_layout.addStretch(1)
 
         self.glue_layout.addLayout(self.combo_box_layout)
@@ -883,6 +910,65 @@ class CentralWidget(QWidget):
         self.displayed_image_keys = None
         # to display a first image
         self.display_selected_field()
+
+    def save_rois(self):
+        """
+        Save rois in a file, save only the rois from images than have been loaded (aka checked)
+        :return:
+        """
+        file_dialog = QFileDialog(self, "Saving ROIs")
+
+        # setting options
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        options |= QFileDialog.DontUseCustomDirectoryIcons
+        file_dialog.setOptions(options)
+
+        # ARE WE TALKING ABOUT FILES OR FOLDERS
+        file_dialog.setFileMode(QFileDialog.AnyFile)
+        file_dialog.setNameFilter("Npz files (*.npz)")
+
+        # OPENING OR SAVING
+        file_dialog.setAcceptMode(QFileDialog.AcceptSave)
+
+        # SET THE STARTING DIRECTORY
+        # default_value = self.analysis_arg.get_default_value()
+        # if default_value is not None and isinstance(default_value, str):
+        #     self.file_dialog.setDirectory(default_value)
+        if file_dialog.exec_() == QDialog.Accepted:
+            npz_file_name = file_dialog.selectedFiles()[0]
+
+    def load_rois(self):
+        """
+        Load rois from file, replace the existing rois for the images corresponding
+        :return:
+        """
+        file_dialog = QFileDialog(self, "Loading ROIs")
+
+        # setting options
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        options |= QFileDialog.DontUseCustomDirectoryIcons
+        file_dialog.setOptions(options)
+
+        # ARE WE TALKING ABOUT FILES OR FOLDERS
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter("Npz files (*.npz)")
+
+        # OPENING OR SAVING
+        file_dialog.setAcceptMode(QFileDialog.AcceptOpen)
+
+        # SET THE STARTING DIRECTORY
+        # default_value = self.analysis_arg.get_default_value()
+        # if default_value is not None and isinstance(default_value, str):
+        #     self.file_dialog.setDirectory(default_value)
+
+        # print(f"if file_dialog.exec_() == QDialog.Accepted")
+        # print(f"file_dialog.exec_() {file_dialog.exec_()}")
+        if file_dialog.exec() == QDialog.Accepted:
+            npz_file_name = file_dialog.selectedFiles()[0]
+            npz_content = np.load(npz_file_name)
+
 
     def status_color_fct(self, status_image_keys):
         """
@@ -900,9 +986,7 @@ class CentralWidget(QWidget):
                     break
             if status_image_keys_in:
                 image_keys_to_checked.append(image_keys)
-        print(f"status_image_keys {status_image_keys}")
-        print(f"image_keys_to_checked {image_keys_to_checked}")
-        print("")
+
         if len(image_keys_to_checked) == 0:
             return "red"
         at_least_one_not_displayed = False
@@ -1151,7 +1235,7 @@ class ZViewWidget(pg.PlotWidget):
             for pg_roi in new_pg_rois:
                 self.update_associated_line(pg_roi, layer)
 
-    def update_associated_line(self, pg_roi, layer):
+    def update_associated_line(self, pg_roi, layer=None):
         """
         Update the line associated to this pg_roi. If line doesn't exists, it is created
         :param pg_roi:
@@ -1161,11 +1245,25 @@ class ZViewWidget(pg.PlotWidget):
         # print(f"pg_roi.boundingRect {pg_roi.boundingRect().getCoords()}")
 
         # getCoords:  position of the rectangle's top-left and bottom-right corner
+        if pg_roi.roi_id in self.line_segments_rois:
+            # if present we remove it, and build a new one, might not be the most efficient way
+            # but the easiest to code
+            line_sgt = self.line_segments_rois[pg_roi.roi_id]
+            layer = self.layer_rois[pg_roi.roi_id]
+            self.pg_plot.removeItem(line_sgt)
+
+        if layer is None:
+            return
+
         rect_coords = pg_roi.boundingRect().getCoords()
-        left_x = rect_coords[0]
-        right_x = rect_coords[2]
+        # position comparing to creation
+        pos_x = pg_roi.state['pos'][0]
+        pos_y = pg_roi.state['pos'][1]
+        print(f"update_associated_line roi_id {pg_roi.roi_id}, layer {layer} pos {pg_roi.state['pos']} {rect_coords}")
+        left_x = rect_coords[0] + pos_x
+        right_x = rect_coords[2] + pos_x
         # calculating y, we center it in the y value corresponding to layer
-        mean_y = (rect_coords[1] + rect_coords[3]) / 2
+        mean_y = (rect_coords[1] + rect_coords[3] + 2*pos_y) / 2
         # scale it from 0 to 1
         y_coord = 1 - (mean_y / self.current_image_height)
         # 0 is 0.5 under the layer
@@ -1178,13 +1276,18 @@ class ZViewWidget(pg.PlotWidget):
         self.line_segments_rois[pg_roi.roi_id] = line_sgt
         self.layer_rois[pg_roi.roi_id] = layer
 
-    def delete_associated_line(self, pg_roi, layer):
+    def delete_associated_line(self, roi_id):
         """
         Delete the line associated to it
-        :param pg_roi:
+        :param roi_id:
         :return:
         """
-        pass
+        if roi_id not in self.line_segments_rois:
+            return
+        line_sgt = self.line_segments_rois[roi_id]
+        self.pg_plot.removeItem(line_sgt)
+        del self.line_segments_rois[roi_id]
+        del self.layer_rois[roi_id]
 
     def link_to_view(self, view_to_link):
         self.view_box.setXLink(view=view_to_link)
