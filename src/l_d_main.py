@@ -114,7 +114,7 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
 
 class RoisManager:
 
-    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict):
+    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, n_layers=6):
 
         # each roi has a cell_id
         self.rois_by_layer_dict = dict()
@@ -130,6 +130,8 @@ class RoisManager:
         self.display_rois = True
         # to keep them unique
         self.individual_roi_id = 0
+        # set to True if a given set of images has been displayed
+        self.has_been_displayed = False
 
     def get_pg_rois(self, cells_display_key, layer_index):
         """
@@ -140,6 +142,8 @@ class RoisManager:
         """
 
         if layer_index not in self.rois_by_layer_dict:
+            return []
+        if cells_display_key not in self.rois_by_layer_dict[layer_index]:
             return []
         return self.rois_by_layer_dict[layer_index][cells_display_key]
 
@@ -162,6 +166,9 @@ class RoisManager:
                     continue
                 new_rois.append(pg_roi)
             self.rois_by_layer_dict[layer_index][cells_diplay_key] = new_rois
+
+    def are_rois_loaded(self):
+        return len(self.rois_by_layer_dict) > 0
 
     def add_pg_roi(self, contours, layer, add_to_cells_display=True):
         display_id = 0
@@ -274,6 +281,9 @@ class MainWindow(QMainWindow):
             self.central_widget.change_layer(increment=True)
         if event.key() == QtCore.Qt.Key_Minus or event.key() == QtCore.Qt.Key_Down:
             self.central_widget.change_layer(increment=False)
+        if event.key() == QtCore.Qt.Key_D:
+            # display selected combo_boxes
+            self.central_widget.display_selected_field()
         # if event.key() == QtCore.Qt.Key_S:
         #     self.central_widget.ci_video_widget.switch_surprise_mfh()
         #     self.central_widget.behavior_video_widget_1.switch_surprise_mfh()
@@ -288,16 +298,34 @@ class MyQComboBox(QComboBox):
     """
     Special instance of ComboBox allowing to handle change so that it is connected to other combo_boxes
     """
-    def __init__(self):
+    def __init__(self, status_color_fct):
         """
         init
         """
         QComboBox.__init__(self)
         self.next_combo_box = None
+        self.previous_combo_box = None
+        self.status_color_fct = status_color_fct
         # each key represent a content to put in the list and the value could be either None, either
         #             another dict whose keys will be the content of the next ComboBox etc...
         self.choices_dict = None
+        # fct that take as argument a list of string and return the status color for the combo_box
+        # self.update_combo_boxes_status = update_combo_boxes_status
+        # self.displayed_color_code = {True: "green", False: "red"}
         self.currentIndexChanged.connect(self.selection_change)
+
+    def get_previous_combo_boxes_content(self, index):
+        """
+
+        :return: A list of string representing the content of the previous combo_boxes
+        """
+        if index == -1:
+            text_at_index = self.currentText()
+        else:
+            text_at_index = self.itemText(index)
+        if self.previous_combo_box is not None:
+            return self.previous_combo_box.get_previous_combo_boxes_content(index=-1) + [text_at_index]
+        return [text_at_index]
 
     def selection_change(self, index):
         """
@@ -308,8 +336,14 @@ class MyQComboBox(QComboBox):
         Returns:
 
         """
-        # TODO: find data with multiple choices to test this code
+
         if self.next_combo_box is None:
+            # # we change the color displayed according to the content of roi_manager
+            # image_keys = self.get_previous_combo_boxes_content()
+            # # has_been_displayed = self.roi_manager_dict[tuple(image_keys)].has_been_displayed
+            # current_index = self.currentIndex()
+            # self.setItemIcon(current_index, get_icon_from_color(self.status_color_fct(image_keys)))
+            # self.update_combo_boxes_status()
             return
 
         # it should not be empty
@@ -327,9 +361,13 @@ class MyQComboBox(QComboBox):
         for choice_id in content_next_combo_box.keys():
             # need to put 2 arguments, in order to be able to find it using findData
             # self.next_combo_box.addItem(str(choice_id), str(choice_id))
-            self.next_combo_box.addItem(get_icon_from_color("red"), str(choice_id))
+            status_color = self.status_color_fct(self.get_previous_combo_boxes_content(self.currentIndex())
+                                                 + [str(choice_id)])
+            self.next_combo_box.addItem(get_icon_from_color(status_color), str(choice_id))
         # to make combo_box following the next ones will be updated according to the content at the index 0
         self.next_combo_box.setCurrentIndex(0)
+        # self.update_combo_boxes_status()
+
 
 
 class MyQFrame(QFrame):
@@ -447,7 +485,8 @@ class MyQFrame(QFrame):
 
 class ComboBoxWidget(MyQFrame):
 
-    def __init__(self, choices, ending_keys=None, horizontal_display=False, parent=None):
+    def __init__(self, choices, status_color_fct,
+                 ending_keys=None, horizontal_display=False, parent=None):
         """
 
         Args:
@@ -457,6 +496,7 @@ class ComboBoxWidget(MyQFrame):
         MyQFrame.__init__(self, parent=parent)
 
         self.combo_boxes = dict()
+        self.status_color_fct = status_color_fct
 
         # represent the keys when to end the running down choices
         self.ending_keys = ending_keys
@@ -523,7 +563,21 @@ class ComboBoxWidget(MyQFrame):
         """
         return True
 
-    def add_multiple_combo_boxes(self,choices_dict, legends, index, ending_keys):
+    def update_combo_boxes_status(self):
+        """
+
+        :return:
+        """
+        # goes through all the combo_boxes, and update the item status color
+        for combo_box in self.combo_boxes:
+            for index_combo_box in range(combo_box.count()):
+                image_keys = combo_box.get_previous_combo_boxes_content(index_combo_box)
+                print(f"update_combo_boxes_status image_keys {image_keys}")
+                status_color = self.status_color_fct(image_keys)
+                combo_box.setItemIcon(index_combo_box, get_icon_from_color(status_color))
+
+
+    def add_multiple_combo_boxes(self, choices_dict, legends, index, ending_keys):
         """
         Allows to add multiple combo boxes, each changing the content of the next one for on given session_id
         Args:
@@ -545,7 +599,7 @@ class ComboBoxWidget(MyQFrame):
             if (ending_keys is not None) and (choice_id in ending_keys):
                 continue
             if combo_box is None:
-                combo_box = MyQComboBox()
+                combo_box = MyQComboBox(status_color_fct=self.status_color_fct)
                 self.combo_boxes.append(combo_box)
             # need to put 2 arguments, in order to be able to find it using findData
             # combo_box.addItem(str(choice_id), str(choice_id))
@@ -557,13 +611,13 @@ class ComboBoxWidget(MyQFrame):
                 next_combo_box = self.add_multiple_combo_boxes(choices_dict=choice_content,
                                                                legends=legends,
                                               index=index+1, ending_keys=ending_keys)
-            elif isinstance(choice_content, list):
-                next_combo_box = MyQComboBox()
-                self.combo_boxes.append(next_combo_box)
-                if legends is not None:
-                    next_combo_box.setToolTip(legends[index+1])
-                for next_choice_id in choice_content:
-                    next_combo_box.addItem(str(next_choice_id), str(next_choice_id))
+            # elif isinstance(choice_content, list):
+            #     next_combo_box = MyQComboBox()
+            #     self.combo_boxes.append(next_combo_box)
+            #     if legends is not None:
+            #         next_combo_box.setToolTip(legends[index+1])
+            #     for next_choice_id in choice_content:
+            #         next_combo_box.addItem(str(next_choice_id), str(next_choice_id))
 
             index_loop_for += 1
 
@@ -577,6 +631,8 @@ class ComboBoxWidget(MyQFrame):
                 combo_box.setToolTip(legends[index])
         combo_box.choices_dict = choices_dict
         combo_box.next_combo_box = next_combo_box
+        if next_combo_box is not None:
+            next_combo_box.previous_combo_box = combo_box
         return combo_box
 
     def set_value(self, value):
@@ -669,6 +725,34 @@ if __name__ == '__main__':
     sys.exit(app.exec_())
 """
 
+def get_tree_dict_as_a_list(tree_dict):
+    """
+    Take a dict that contains as value only other dicts or list of simple types value sor a simple type value
+    and return a list of list of all keys with last data at the end
+    Args:
+        tree_dict:
+
+    Returns:
+
+    """
+    tree_as_list = []
+    for key, sub_tree in tree_dict.items():
+        # branch_list = [key]
+        # tree_as_list.append(branch_list)
+        if isinstance(sub_tree, dict):
+            branches = get_tree_dict_as_a_list(tree_dict=sub_tree)
+            tree_as_list.extend([[key] + branch for branch in branches])
+        elif isinstance(sub_tree, list):
+            # means we reached a leaves
+            for leaf in sub_tree:
+                tree_as_list.append([key, leaf])
+        else:
+            # means we reached a leaf
+            leaf = sub_tree
+            tree_as_list.append([key, leaf])
+    return tree_as_list
+
+
 class CentralWidget(QWidget):
 
     def __init__(self, main_window):
@@ -683,12 +767,18 @@ class CentralWidget(QWidget):
         red_dir_path = os.path.join(root_path, "cellules (red)")
         cfos_dir_path = os.path.join(root_path, "cfos (green)")
 
-        self.images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path, mask_dir_path=mask_dir_path)
+        self.images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
+                                          mask_dir_path=mask_dir_path)
+
+        self.all_image_keys = get_tree_dict_as_a_list(self.images_dict)
+        # removing the two last keys which are like "mask", "red" and the tiffs file_name
+        self.all_image_keys = set([tuple(images[:-2]) for images in self.all_image_keys])
         # raise Exception("KING IN THE NORTH")
 
         # Enable antialiasing for prettier plots
         pg.setConfigOptions(antialias=True)
 
+        # we have on roi_manager for each image_keys, the key is a tuple of string representing the image
         self.rois_manager_dict = dict()
 
         self.current_layer = 0
@@ -719,6 +809,7 @@ class CentralWidget(QWidget):
         self.mask_widget.link_to_view(view=self.cells_widget.view)
 
         self.z_view_widget = ZViewWidget(n_layers=self.n_layers, current_layer=self.current_layer,
+                                         images_dict=self.images_dict,
                                          main_window=main_window, width_image=500, parent=self,
                                          linked_cells_display_widget=self.cells_widget)
         self.z_view_widget.link_to_view(view_to_link=self.cells_widget.view)
@@ -737,6 +828,17 @@ class CentralWidget(QWidget):
                                            "mask": self.mask_widget}
 
         self.main_layout.addLayout(self.grid_layout)
+
+        # Creating the roi managers
+        # Use saved rois to load them
+        cells_display_keys = ["mask", "red", "cfos"]
+        for image_keys in self.all_image_keys:
+            if image_keys in self.rois_manager_dict:
+                continue
+            roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
+                                          cells_display_keys=cells_display_keys,
+                                          cells_display_dict=self.cells_display_widgets_dict)
+            self.rois_manager_dict[image_keys] = roi_manager
 
         self.control_panel_layout = QVBoxLayout()
 
@@ -758,7 +860,9 @@ class CentralWidget(QWidget):
 
         self.glue_layout = QHBoxLayout()
         self.combo_box_layout = QVBoxLayout()
-        self.combo_box = ComboBoxWidget(choices=self.images_dict, ending_keys=["red", "cfos", "mask"],
+        self.combo_box = ComboBoxWidget(choices=self.images_dict,
+                                        status_color_fct=self.status_color_fct,
+                                        ending_keys=["red", "cfos", "mask"],
                                         parent=self)
         self.combo_box_layout.addWidget(self.combo_box)
         self.display_button = QPushButton("Display", self)
@@ -776,8 +880,40 @@ class CentralWidget(QWidget):
 
         self.setLayout(self.main_layout)
 
+        self.displayed_image_keys = None
         # to display a first image
         self.display_selected_field()
+
+    def status_color_fct(self, status_image_keys):
+        """
+        For a list of image keys, return the color that should be displayed in the combo box.
+        Red: not displayed yet, Green: displayed yet (TODO: Orage: loaded from a file)
+        :param image_keys:
+        :return:
+        """
+        image_keys_to_checked = []
+        for image_keys in self.all_image_keys:
+            status_image_keys_in = True
+            for index, status_image_key in enumerate(status_image_keys):
+                if status_image_key != image_keys[index]:
+                    status_image_keys_in = False
+                    break
+            if status_image_keys_in:
+                image_keys_to_checked.append(image_keys)
+        print(f"status_image_keys {status_image_keys}")
+        print(f"image_keys_to_checked {image_keys_to_checked}")
+        print("")
+        if len(image_keys_to_checked) == 0:
+            return "red"
+        at_least_one_not_displayed = False
+        for image_keys in image_keys_to_checked:
+            roi_manager = self.rois_manager_dict[image_keys]
+            if not roi_manager.are_rois_loaded():
+                at_least_one_not_displayed = True
+        if at_least_one_not_displayed:
+            return "red"
+        return "green"
+
 
     def layer_value_changed(self, value):
         """
@@ -822,25 +958,43 @@ class CentralWidget(QWidget):
             self.layer_spin_box.setValue(self.current_layer)
 
     def _get_rois_manager(self, image_keys):
-        if image_keys not in self.rois_manager_dict:
-            cells_display_keys = ["mask", "red", "cfos"]
-            roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
-                                      cells_display_keys=cells_display_keys,
-                                      cells_display_dict=self.cells_display_widgets_dict)
-            self.rois_manager_dict[image_keys] = roi_manager
-            # if not yet created, then we load the rois from the mask data
+        # TODO: load roi manage from saved contours
+        roi_manager = self.rois_manager_dict[image_keys]
+        if not roi_manager.are_rois_loaded():
+            # if not yet loaded then we load the rois from the mask data
             data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
             mask_imgs = get_image_from_tiff(file_name=data_dict["mask"])
             roi_manager.load_rois_coordinates_from_masks(mask_imgs=mask_imgs)
 
-        return self.rois_manager_dict[image_keys]
+        return roi_manager
+        #
+        # if image_keys not in self.rois_manager_dict:
+        #     cells_display_keys = ["mask", "red", "cfos"]
+        #     roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
+        #                               cells_display_keys=cells_display_keys,
+        #                               cells_display_dict=self.cells_display_widgets_dict)
+        #     self.rois_manager_dict[image_keys] = roi_manager
+        #     # if not yet created, then we load the rois from the mask data
+        #     data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
+        #     mask_imgs = get_image_from_tiff(file_name=data_dict["mask"])
+        #     roi_manager.load_rois_coordinates_from_masks(mask_imgs=mask_imgs)
+        #
+        # return self.rois_manager_dict[image_keys]
 
     def display_selected_field(self):
-        image_keys = self.combo_box.get_value()
-        roi_manager = self._get_rois_manager(tuple(image_keys))
+        """
+        Display the selected field and change the status of the previously displayed (as seen)
+        :return:
+        """
+        if self.displayed_image_keys is not None:
+            pass
+
+        self.displayed_image_keys = self.combo_box.get_value()
+        roi_manager = self._get_rois_manager(tuple(self.displayed_image_keys))
         # print(f"image_keys {image_keys}")
         for cells_display_widget in self.cells_display_widgets:
-            cells_display_widget.set_images(image_keys, roi_manager)
+            cells_display_widget.set_images(self.displayed_image_keys, roi_manager)
+        self.combo_box.update_combo_boxes_status()
 
 
 class MyViewBox(pg.ViewBox):
@@ -887,7 +1041,7 @@ class MyViewBox(pg.ViewBox):
 
 class ZViewWidget(pg.PlotWidget):
 
-    def __init__(self, n_layers, current_layer,  main_window, width_image, parent, linked_cells_display_widget):
+    def __init__(self, n_layers, current_layer,  images_dict, main_window, width_image, parent, linked_cells_display_widget):
 
         self.view_box = MyViewBox()
 
@@ -898,6 +1052,10 @@ class ZViewWidget(pg.PlotWidget):
         self.current_layer = current_layer
         self.n_layers = n_layers
         self.main_window = main_window
+        self.images = None
+        self.images_dict = images_dict
+        # height of the image, used to put y coord proportional
+        self.current_image_height = 100
 
         self.roi_manager = None
         self.image_keys = None
@@ -918,40 +1076,60 @@ class ZViewWidget(pg.PlotWidget):
 
         self.pg_plot.setAspectLocked(True)
 
-        color_pen = (0, 0, 255)
+        self.layer_color_pen = pg.mkPen(color=(0, 0, 255),  width=1)
         self.current_layer_marker = pg.InfiniteLine(pos=[0, self.current_layer], angle=0,
-                                                    pen=color_pen, movable=False)
+                                                    pen=self.layer_color_pen, movable=False)
         self.pg_plot.addItem(item=self.current_layer_marker)
+
+        self.lines_grid = dict()
+        # white dot line
+        mk_pen = pg.mkPen(color=(255, 255, 255), style=QtCore.Qt.DashLine, width=0.5)
+        for layer in range(self.n_layers-1):
+            grid_line = pg.InfiniteLine(pos=[0, layer+0.5], angle=0,
+                                                    pen=mk_pen, movable=False)
+            self.pg_plot.addItem(item=grid_line)
+            self.lines_grid[layer] = grid_line
+
 
         # test_line = pg.InfiniteLine(pos=[100, 0], angle=90,
         #                                             pen=color_pen, movable=False)
         # self.pg_plot.addItem(item=test_line)
 
     def set_layer(self, layer):
-        # not used, but necessary
-        pass
+        self.current_layer = layer
+        self.pg_plot.removeItem(item=self.current_layer_marker)
+
+        self.current_layer_marker = pg.InfiniteLine(pos=[0, self.current_layer], angle=0,
+                                                    pen=self.layer_color_pen, movable=False)
+        self.pg_plot.addItem(item=self.current_layer_marker)
 
     def change_x_range(self, range_values):
         self.pg_plot.setXRange(range_values[0], range_values[1])
 
-    def update_region(self):
-        # print("z_stack update_region")
-        new_view_range = self.linked_cells_display_widget.view.viewRange()
-        actual_view_range = self.pg_plot.view_box.viewRange()
-        if (new_view_range[0][0] != actual_view_range[0][0]) or (new_view_range[0][1] != actual_view_range[0][1]):
-            self.pg_plot.setXRange(new_view_range[0][0], new_view_range[0][1], padding=0)
-        # print(f"z_stack view_range {view_range}")
+    # def update_region(self):
+    #     # print("z_stack update_region")
+    #     new_view_range = self.linked_cells_display_widget.view.viewRange()
+    #     actual_view_range = self.pg_plot.view_box.viewRange()
+    #     if (new_view_range[0][0] != actual_view_range[0][0]) or (new_view_range[0][1] != actual_view_range[0][1]):
+    #         self.pg_plot.setXRange(new_view_range[0][0], new_view_range[0][1], padding=0)
+    #     # print(f"z_stack view_range {view_range}")
 
     def set_images(self, image_keys, roi_manager):
         """
         image_keys: List of string
         """
+
+        data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
+        self.images = get_image_from_tiff(file_name=data_dict["mask"])
+        image = self.images[0]
+        width = image.shape[1]
+        self.current_image_height = image.shape[1]
+        self.change_x_range((0, width))
+
         self.roi_manager = roi_manager
         self.image_keys = image_keys
         self._update_pg_rois()
 
-        # data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
-        # self.images = get_image_from_tiff(file_name=data_dict[self.id_widget])
         # # print(f"key_image {self.last_image_key} {data_dict[self.last_image_key]}")
         #
         # self._update_display()
@@ -969,10 +1147,9 @@ class ZViewWidget(pg.PlotWidget):
             new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key="mask", layer_index=layer)
             if len(old_line_segments_rois) > 0:
                 for line_roi in old_line_segments_rois.values():
-                    self.view.removeItem(line_roi)
+                    self.pg_plot.removeItem(line_roi)
             for pg_roi in new_pg_rois:
                 self.update_associated_line(pg_roi, layer)
-
 
     def update_associated_line(self, pg_roi, layer):
         """
@@ -987,7 +1164,16 @@ class ZViewWidget(pg.PlotWidget):
         rect_coords = pg_roi.boundingRect().getCoords()
         left_x = rect_coords[0]
         right_x = rect_coords[2]
-        line_sgt = pg.LineSegmentROI([[left_x, layer], [right_x, layer]], pen='r')
+        # calculating y, we center it in the y value corresponding to layer
+        mean_y = (rect_coords[1] + rect_coords[3]) / 2
+        # scale it from 0 to 1
+        y_coord = 1 - (mean_y / self.current_image_height)
+        # 0 is 0.5 under the layer
+        y_coord = layer - 0.5 + y_coord
+
+        line_pen = pg.mkPen(color=(255, 0, 0), width=4)
+        line_sgt = pg.LineSegmentROI([[left_x, y_coord], [right_x, y_coord]], pen=line_pen)
+
         self.pg_plot.addItem(line_sgt)
         self.line_segments_rois[pg_roi.roi_id] = line_sgt
         self.layer_rois[pg_roi.roi_id] = layer
@@ -1123,6 +1309,7 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         """
         if event.key() == QtCore.Qt.Key_R:
             self.create_new_roi_in_the_middle()
+
         # Sending the event to the main window if the widget is in the main window
         if self.main_window is not None:
             self.main_window.keyPressEvent(event=event)
@@ -1153,11 +1340,20 @@ def get_contours_from_mask_img(mask_img):
 
     coord_contours = []
     for contour in contours:
+        area = cv2.contourArea(contour)
+        # perimeter = cv2.arcLength(contour, True)
+        # Contour approximation
+        # https://docs.opencv.org/3.4/dd/d49/tutorial_py_contour_features.html
+        epsilon = 0.01 * cv2.arcLength(contour, True)
+        contour = cv2.approxPolyDP(contour, epsilon, True)
         xy = []
         for c in contour:
             xy.append([c[0][0]+0.5, c[0][1]+0.5])
         # removing the contour that take all the frame
         if [0.5, 0.5] in xy:
+            continue
+        if area < 5:
+            # removing one pixel cells
             continue
         coord_contours.append(xy)
 
