@@ -18,6 +18,11 @@ import os
 from sortedcontainers import SortedDict
 from l_d_rois import PolyLineROI
 
+BREWER_COLORS = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f',
+                 '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#a50026', '#d73027',
+                 '#f46d43', '#fdae61', '#fee090', '#ffffbf', '#e0f3f8', '#abd9e9',
+                 '#74add1', '#4575b4', '#313695']
+DEFAULT_ROI_PEN_WIDTH = 8
 
 # class ZStackImages
 
@@ -114,8 +119,10 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
 
 class RoisManager:
 
-    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, z_view_widget, n_layers=6):
+    def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, z_view_widget,
+                 cells_buttons_layout, n_layers=7):
 
+        self.n_layers = n_layers
         # each roi has a cell_id
         self.rois_by_layer_dict = dict()
         self.z_view_widget = z_view_widget
@@ -123,7 +130,7 @@ class RoisManager:
         self.n_displays = n_displays
         # rois_id: tuple of strings
         self.rois_manager_id = rois_manager_id
-        # first one is for the mask
+        # first one is for the red
         self.cells_display_keys = cells_display_keys
         # contains the instance of CellsDisplayMainWidget
         self.cells_display_dict = cells_display_dict
@@ -133,6 +140,15 @@ class RoisManager:
         self.individual_roi_id = 0
         # set to True if a given set of images has been displayed
         self.has_been_displayed = False
+        # dict with key a cell_id and with value a list of ROI_id (int)
+        self.cells_dict = dict()
+        # up to 26 cells
+        self.cells_color = BREWER_COLORS
+
+        # for display purpose
+        self.cells_buttons_layout = cells_buttons_layout
+        # contains instance of QPushButton
+        self.cells_buttons_dict = SortedDict()
 
     def get_pg_rois(self, cells_display_key, layer_index):
         """
@@ -158,16 +174,25 @@ class RoisManager:
         Returns:
 
         """
+
         for cells_diplay_key, rois_list in self.rois_by_layer_dict[layer_index].items():
             new_rois = []
             for pg_roi in rois_list:
                 if pg_roi.roi_id == roi_id:
                     # we need to remove it from the display
                     self.cells_display_dict[cells_diplay_key].remove_pg_roi(pg_roi)
+                    if cells_diplay_key == "red":
+                        # main_roi
+                        # removing it from the cell_ids list
+                        cell_id = pg_roi.cell_id
+                        self.cells_dict[cell_id].remove(roi_id)
                     continue
                 new_rois.append(pg_roi)
             self.rois_by_layer_dict[layer_index][cells_diplay_key] = new_rois
         self.z_view_widget.delete_associated_line(roi_id=roi_id)
+
+    def _button_action(self):
+        print(f"_button_action rois_manager_id {self.rois_manager_id}")
 
     def roi_updated(self, pg_roi):
         """
@@ -176,7 +201,6 @@ class RoisManager:
         :param pg_roi:
         :return:
         """
-        print(f"roi_updated pg_roi {pg_roi.roi_id}")
         if pg_roi.roi_id is None:
             return
         self.z_view_widget.update_associated_line(pg_roi=pg_roi, layer=None)
@@ -186,7 +210,8 @@ class RoisManager:
 
     def add_pg_roi(self, contours, layer, add_to_cells_display=True):
         display_id = 0
-        main_roi = PolyLineROI(contours, pen=(6, 9), closed=True, movable=True,
+        roi_pen = pg.mkPen(color="white", width=DEFAULT_ROI_PEN_WIDTH)
+        main_roi = PolyLineROI(contours, pen=roi_pen, closed=True, movable=True,
                                invisible_handle=False, alterable=True, no_seq_hover_action=False,
                                roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
         self.z_view_widget.update_associated_line(pg_roi=main_roi, layer=layer)
@@ -196,7 +221,7 @@ class RoisManager:
         if add_to_cells_display:
             self.cells_display_dict[self.cells_display_keys[display_id]].add_pg_roi(main_roi)
         for display_id in np.arange(1, self.n_displays):
-            other_roi = PolyLineROI(contours, pen=(6, 9), closed=True, movable=False,
+            other_roi = PolyLineROI(contours, pen=roi_pen, closed=True, movable=False,
                                     invisible_handle=False, alterable=False, no_seq_hover_action=True,
                                     roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
             main_roi.link_a_roi(roi_to_link=other_roi)
@@ -212,33 +237,105 @@ class RoisManager:
         for layer, mask_img in enumerate(mask_imgs):
 
             self.rois_by_layer_dict[layer] = dict()
-            contours = get_contours_from_mask_img(mask_img=mask_img)
+            contours, centroids = get_contours_from_mask_img(mask_img=mask_img)
 
-            for contour in contours:
+            for contour_index, contour in enumerate(contours):
                 display_id = 0
                 main_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=True,
                                        invisible_handle=False, alterable=True, no_seq_hover_action=False,
-                                       roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
+                                       roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self,
+                                       original_centroid=centroids[contour_index])
                 if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
                     self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
                 self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
                 for display_id in np.arange(1, self.n_displays):
                     other_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=False,
                                             invisible_handle=False, alterable=False, no_seq_hover_action=True,
-                                            roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
+                                            roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self,
+                                            original_centroid=centroids[contour_index])
                     main_roi.link_a_roi(roi_to_link=other_roi)
                     if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
                         self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
                     self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(other_roi)
                 self.individual_roi_id += 1
-
-            # now we want to create rois
-            # print(f"contours len {len(contours)}")
-            # print(f"contours {contours}")
+        # Gathering ROI as cells
+        self._initiate_cells_id()
 
     def _initiate_cells_id(self):
-        # from laoded masks, determine how many cells are present and give an cell_id to each mask
-        pass
+        # from laoded masks, determine how many cells are present and give a cell_id to each mask
+        # going layer by layer, to each ROI that don't have a cell_id yet
+
+        # meaning that if two centroid from different layer are closer than 5 pixels, they are considered coming
+        # from the same cell
+        centroid_range = 10
+        cell_id = 0
+        main_cells_display_key = self.cells_display_keys[0]
+        for layer in range(self.n_layers):
+            if main_cells_display_key not in self.rois_by_layer_dict[layer]:
+                # might happen if no ROI are registered
+                continue
+            for pg_roi in self.rois_by_layer_dict[layer][main_cells_display_key]:
+                if pg_roi.cell_id is not None:
+                    # cell_id already given
+                    continue
+                pg_roi.cell_id = cell_id
+                for link_roi in pg_roi.linked_rois:
+                    link_roi.cell_id = cell_id
+                if cell_id not in self.cells_dict:
+                    self.cells_dict[cell_id] = []
+                self.cells_dict[cell_id].append(pg_roi.roi_id)
+                cell_id += 1
+                centroid = np.array(pg_roi.original_centroid)
+                # now looking in other layer for cell close by
+                if layer < self.n_layers - 1:
+                    for other_layer in np.arange(layer+1, self.n_layers):
+                        if main_cells_display_key not in self.rois_by_layer_dict[other_layer]:
+                            continue
+                        for other_pg_roi in self.rois_by_layer_dict[other_layer][main_cells_display_key]:
+                            if other_pg_roi.cell_id is not None:
+                                continue
+                            other_centroid = np.array(other_pg_roi.original_centroid)
+                            dist = np.linalg.norm(centroid - other_centroid)
+                            if dist < centroid_range:
+                                # then if the same cell
+                                other_pg_roi.cell_id = pg_roi.cell_id
+                                for link_roi in other_pg_roi.linked_rois:
+                                    link_roi.cell_id = pg_roi.cell_id
+                            else:
+                                # nothing, the id of the cell will be determined later on
+                                pass
+        self._build_cells_buttons()
+
+    def update_colors(self):
+        # go over all ROIs (PolyLine and Line), and according to their cell_id, change their color
+        for layer in range(self.n_layers):
+            for display_key in self.rois_by_layer_dict[layer]:
+                for pg_roi in self.rois_by_layer_dict[layer][display_key]:
+                    cell_id = pg_roi.cell_id
+                    color = self.cells_color[cell_id]
+                    roi_pen = pg.mkPen(color=color, width=DEFAULT_ROI_PEN_WIDTH)
+                    pg_roi.setPen(roi_pen)
+                    self.z_view_widget.update_line_color(pg_roi=pg_roi)
+
+    def _build_cells_buttons(self):
+        print(f"_build_cells_buttons_layout {len(self.cells_dict)} cells")
+        for cell_id in self.cells_dict.keys():
+            cell_button = QPushButton(str(cell_id))
+            cell_button.setToolTip(f"Cell {cell_id}")
+            cell_button.clicked.connect(self._button_action)
+            cell_button.setStyleSheet(f"background-color:{self.cells_color[cell_id]};")
+            # self.cells_buttons_layout.addWidget(cell_button)
+            self.cells_buttons_dict[cell_id] = cell_button
+
+    def update_buttons_layout(self):
+        while self.cells_buttons_layout.count() > 0:
+            item = self.cells_buttons_layout.itemAt(0)
+            item.widget().close()
+            self.cells_buttons_layout.removeItem(item)
+        if self.cells_buttons_layout.count() == 0:
+            for cell_id, button in self.cells_buttons_dict.items():
+                button.show()
+                self.cells_buttons_layout.addWidget(button)
 
     def load_pre_computed_coordinates(self, file_name):
         pass
@@ -800,6 +897,8 @@ class CentralWidget(QWidget):
 
         self.n_layers = 7
 
+        self.cells_buttons_layout = QVBoxLayout()
+
         self.main_layout = QHBoxLayout()
 
         self.grid_layout = QGridLayout()
@@ -846,13 +945,14 @@ class CentralWidget(QWidget):
 
         # Creating the roi managers
         # Use saved rois to load them
-        cells_display_keys = ["mask", "red", "cfos"]
+        cells_display_keys = ["red", "mask", "cfos"]
         for image_keys in self.all_image_keys:
             if image_keys in self.rois_manager_dict:
                 continue
             roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
                                       z_view_widget=self.z_view_widget,
                                       cells_display_keys=cells_display_keys,
+                                      cells_buttons_layout=self.cells_buttons_layout,
                                       cells_display_dict=self.cells_display_widgets_dict)
             self.rois_manager_dict[image_keys] = roi_manager
 
@@ -896,6 +996,7 @@ class CentralWidget(QWidget):
         self.load_rois_button.clicked.connect(self.load_rois)
         self.combo_box_layout.addWidget(self.load_rois_button)
 
+        self.combo_box_layout.addLayout(self.cells_buttons_layout)
         self.combo_box_layout.addStretch(1)
 
         self.glue_layout.addLayout(self.combo_box_layout)
@@ -910,6 +1011,25 @@ class CentralWidget(QWidget):
         self.displayed_image_keys = None
         # to display a first image
         self.display_selected_field()
+
+    def update_cells_buttons_layout(self):
+        """
+        Update the Cells buttons layout displayed depending on the images displayed
+        :return:
+        """
+        # if self.cells_buttons_roi_manager is not None:
+        #     print("Removing cells_buttons_layout")
+        #     cells_buttons_layout = self.cells_buttons_roi_manager.cells_buttons_layout
+        #     self.cells_buttons_roi_manager.hide_buttons()
+        #     self.combo_box_layout.removeItem(cells_buttons_layout)
+        roi_manager = self.rois_manager_dict[tuple(self.displayed_image_keys)]
+        roi_manager.update_buttons_layout()
+        # self.cells_buttons_roi_manager = roi_manager
+        # cells_buttons_layout = self.cells_buttons_roi_manager.cells_buttons_layout
+        # self.cells_buttons_roi_manager.show_buttons()
+        # print(f"update_cells_buttons_layout {tuple(self.displayed_image_keys)}")
+        # print(f"n buttons {cells_buttons_layout.count()}")
+        # self.combo_box_layout.insertLayout(self.combo_box_layout.count() - 1, cells_buttons_layout)
 
     def save_rois(self):
         """
@@ -1070,15 +1190,16 @@ class CentralWidget(QWidget):
         Display the selected field and change the status of the previously displayed (as seen)
         :return:
         """
-        if self.displayed_image_keys is not None:
-            pass
 
         self.displayed_image_keys = self.combo_box.get_value()
         roi_manager = self._get_rois_manager(tuple(self.displayed_image_keys))
         # print(f"image_keys {image_keys}")
         for cells_display_widget in self.cells_display_widgets:
             cells_display_widget.set_images(self.displayed_image_keys, roi_manager)
+        # now we update colors
+        roi_manager.update_colors()
         self.combo_box.update_combo_boxes_status()
+        self.update_cells_buttons_layout()
 
 
 class MyViewBox(pg.ViewBox):
@@ -1116,8 +1237,9 @@ class MyViewBox(pg.ViewBox):
             ev._button = QtCore.Qt.LeftButton
             pg.ViewBox.mouseDragEvent(self, ev)
         elif ev.button() == QtCore.Qt.LeftButton:
-            self.setMouseMode(self.RectMode)
-            pg.ViewBox.mouseDragEvent(self, ev)
+            pass
+            # self.setMouseMode(self.RectMode)
+            # pg.ViewBox.mouseDragEvent(self, ev)
         else:
             # ev.ignore()
             pg.ViewBox.mouseDragEvent(self, ev)
@@ -1140,6 +1262,7 @@ class ZViewWidget(pg.PlotWidget):
         self.images_dict = images_dict
         # height of the image, used to put y coord proportional
         self.current_image_height = 100
+        self.cells_color = BREWER_COLORS
 
         self.roi_manager = None
         self.image_keys = None
@@ -1228,12 +1351,18 @@ class ZViewWidget(pg.PlotWidget):
         self.line_segments_rois = dict()
         self.layer_rois = dict()
         for layer in np.arange(0, self.n_layers):
-            new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key="mask", layer_index=layer)
+            new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key="red", layer_index=layer)
             if len(old_line_segments_rois) > 0:
                 for line_roi in old_line_segments_rois.values():
                     self.pg_plot.removeItem(line_roi)
             for pg_roi in new_pg_rois:
                 self.update_associated_line(pg_roi, layer)
+
+    def update_line_color(self, pg_roi):
+        color = self.cells_color[pg_roi.cell_id]
+        line_sgt = self.line_segments_rois[pg_roi.roi_id]
+        line_pen = pg.mkPen(color=color, width=4)
+        line_sgt.setPen(line_pen)
 
     def update_associated_line(self, pg_roi, layer=None):
         """
@@ -1259,7 +1388,7 @@ class ZViewWidget(pg.PlotWidget):
         # position comparing to creation
         pos_x = pg_roi.state['pos'][0]
         pos_y = pg_roi.state['pos'][1]
-        print(f"update_associated_line roi_id {pg_roi.roi_id}, layer {layer} pos {pg_roi.state['pos']} {rect_coords}")
+        # print(f"update_associated_line roi_id {pg_roi.roi_id}, layer {layer} pos {pg_roi.state['pos']} {rect_coords}")
         left_x = rect_coords[0] + pos_x
         right_x = rect_coords[2] + pos_x
         # calculating y, we center it in the y value corresponding to layer
@@ -1269,7 +1398,8 @@ class ZViewWidget(pg.PlotWidget):
         # 0 is 0.5 under the layer
         y_coord = layer - 0.5 + y_coord
 
-        line_pen = pg.mkPen(color=(255, 0, 0), width=4)
+        color = self.cells_color[pg_roi.cell_id]
+        line_pen = pg.mkPen(color=color, width=4)
         line_sgt = pg.LineSegmentROI([[left_x, y_coord], [right_x, y_coord]], pen=line_pen)
 
         self.pg_plot.addItem(line_sgt)
@@ -1442,6 +1572,7 @@ def get_contours_from_mask_img(mask_img):
     # CHAIN_APPROX_SIMPLE CHAIN_APPROX_TC89_L1
 
     coord_contours = []
+    centroids = []
     for contour in contours:
         area = cv2.contourArea(contour)
         # perimeter = cv2.arcLength(contour, True)
@@ -1458,9 +1589,16 @@ def get_contours_from_mask_img(mask_img):
         if area < 5:
             # removing one pixel cells
             continue
+
         coord_contours.append(xy)
 
-    return coord_contours
+        # centroid
+        m = cv2.moments(contour)
+        cx = int(m['m10'] / m['m00'])
+        cy = int(m['m01'] / m['m00'])
+        centroids.append((cx, cy))
+
+    return coord_contours, centroids
 
 class PlanMask:
 

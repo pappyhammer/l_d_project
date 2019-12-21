@@ -119,7 +119,7 @@ class ROI(GraphicsObject):
     def __init__(self, pos, size, roi_manager, angle=0.0, invertible=False, maxBounds=None, snapSize=1.0,
                  scaleSnap=False, translateSnap=False, rotateSnap=False, parent=None, pen=None, movable=True,
                  removable=True, invisible_handle=False, alterable=True, no_seq_hover_action=False, roi_id=None,
-                 layer_index=None
+                 layer_index=None, original_centroid=None
                  ):
         # QObjectWorkaround.__init__(self)
         GraphicsObject.__init__(self, parent)
@@ -127,6 +127,11 @@ class ROI(GraphicsObject):
         # every modification on that roi should happend as well to linked ones
         self.linked_rois = []
         self.setAcceptedMouseButtons(QtCore.Qt.NoButton)
+        # used to determine which roi belong to which cell based on their original centroid
+        # tuple of two float
+        self.original_centroid = original_centroid
+        # cell id of the cell to which the ROI belongs
+        self.cell_id = None
         pos = Point(pos)
         size = Point(size)
         self.aspectLocked = False
@@ -1985,7 +1990,7 @@ class PolyLineROI(ROI):
 
     """
 
-    def __init__(self, positions, closed=False, pos=None, **args):
+    def __init__(self, positions, closed=False, pos=None, original_centroid=None, **args):
 
         if pos is None:
             pos = [0, 0]
@@ -1995,7 +2000,7 @@ class PolyLineROI(ROI):
         # used to give a unique index to each segment
         self.n_segments_created = 0
         self.segments_by_id = dict()
-        ROI.__init__(self, pos, size=[1, 1], **args)
+        ROI.__init__(self, pos, original_centroid=original_centroid, size=[1, 1], **args)
 
         self.setPoints(positions)
 
