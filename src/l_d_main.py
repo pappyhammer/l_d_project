@@ -23,7 +23,7 @@ BREWER_COLORS = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c
                  '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#a50026', '#d73027',
                  '#f46d43', '#fdae61', '#fee090', '#ffffbf', '#e0f3f8', '#abd9e9',
                  '#74add1', '#4575b4', '#313695']
-DEFAULT_ROI_PEN_WIDTH = 8
+DEFAULT_ROI_PEN_WIDTH = 10
 
 # class ZStackImages
 
@@ -145,6 +145,7 @@ class MyQPushButton(QPushButton):
 class RoisManager:
 
     def __init__(self, rois_manager_id, n_displays, cells_display_keys, cells_display_dict, z_view_widget,
+                 images_dict,
                  cells_buttons_layout, cells_n_layers_layout, n_layers=7):
 
         self.n_layers = n_layers
@@ -165,14 +166,16 @@ class RoisManager:
         self.display_rois = True
         # to keep them unique
         self.individual_roi_id = 0
-        # set to True if a given set of images has been displayed
-        self.has_been_displayed = False
         # dict with key a cell_id and with value a list of ROI_id (int)
         self.cells_dict = dict()
         # dict with key roi_id and return the pg_roi associated
         self.pg_rois_dict = dict()
         # up to 26 cells
         self.cells_color = BREWER_COLORS
+
+        # see get_tiff_names for the structure
+        # dict with: group, f, position, s, depth, key_image
+        self.images_dict = images_dict
 
         # for display purpose
         self.cells_buttons_layout = cells_buttons_layout
@@ -186,6 +189,47 @@ class RoisManager:
 
         # Incremented each time a new cell is created
         self.cell_id = 0
+
+        # represent data saved than has been loaded
+        # Dict with key being the cell_id, and value is a dict with key the layer and then value a list of list of tuple
+        # of int representing the contours of each roi in the layer
+        self.pre_computed_data = None
+
+        # indicated that is pre_computed_data is available, if it has been used yet
+        self.pre_computed_data_not_loaded_yet = True
+
+    def is_pre_computed_data_available(self):
+        """
+        Return True if some saved_data (in a file) are available
+        :return:
+        """
+        return self.pre_computed_data is not None
+
+    def set_pre_computed_coordinates(self, data_dict):
+        """
+        Set pre-computed data.
+        Dict with key being the cell_id, and value is a dict with key the layer and then value a list of list of tuple
+        of int representing the contours of each roi in the layer
+        :param data_dict:
+        :return:
+        """
+        self.pre_computed_data = data_dict
+        self.pre_computed_data_not_loaded_yet = True
+
+    def load_saved_data(self):
+        """
+        Use pre-computed data previously saved
+        :return:
+        """
+        self.pre_computed_data_not_loaded_yet = False
+        self._erase_all()
+        for cell_id, layer_dict in self.pre_computed_data.items():
+            for layer, contours in layer_dict.items():
+                print(f"load_saved_data cell {cell_id}, layer {layer} {len(contours)} contours")
+                for contour in contours:
+                    self.add_pg_roi(contours=contour, layer=layer, force_cell_id=cell_id, add_to_cells_display=False,
+                                    with_layout_update=False)
+        self.update_buttons_layout()
 
     def copy_roi(self, pg_roi):
         """
@@ -211,15 +255,23 @@ class RoisManager:
 
     def get_contours_data(self):
         """
-        Get contours data
+        Get contours data a
         Format is a dict, first key is the cell_id, value is a dict with key an int representing the layer then
         the value is a list of list of tuples of 2 int representing x, y for each roi of the layer
         :return:
         """
+        images_data_dict = get_data_in_dict_from_keys(list_keys=tuple(self.rois_manager_id), data_dict=self.images_dict)
+        cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
+
+        # TODO: Build a function to get measure_stat from file outside of the GUI
+        measure_stat = False
+
         data_dict = dict()
         for cell_id, roi_ids in self.cells_dict.items():
             if cell_id not in data_dict:
                 data_dict[cell_id] = dict()
+            sum_areas = 0
+            sum_pixels_intensity = 0
             for roi_id in roi_ids:
                 pg_roi = self.pg_rois_dict[roi_id]
                 layer = pg_roi.layer_index
@@ -229,8 +281,37 @@ class RoisManager:
 
                 handle_name_positions = pg_roi.getLocalHandlePositions()
                 # handle_name_pos[1] is an instance of QtCore.QPoint
-                contours = [(handle_name_pos[1].x(), handle_name_pos[1].y()) for handle_name_pos in handle_name_positions]
+                contours = [(handle_name_pos[1].x(), handle_name_pos[1].y()) for handle_name_pos in
+                            handle_name_positions]
                 data_dict[cell_id][layer].append(contours)
+
+                # adding pixels intensity and contour area
+                if measure_stat:
+                    cfos_image = cfos_images[layer]
+                    # building pixel mask from the contours
+                    # converting contours as array and value as integers
+                    contours_array = np.zeros((2, len(contours)), dtype="int16")
+                    for contour_index, contour in enumerate(contours):
+                        contours_array[0, contour_index] = int(contour[0])
+                        contours_array[1, contour_index] = int(contour[1])
+                    mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
+                    # morphology.binary_fill_holes(input
+                    mask_image[contours_array[1, :], contours_array[0, :]] = True
+                    area = np.sum(mask_image)
+                    sum_areas += area
+                    # print(f"Cell {cell_id} layer {layer}: area {area}")
+                    # normalizing cfos image, z_score
+                    cfos_image = cfos_image - np.mean(cfos_image)
+                    cfos_image = cfos_image / np.std(cfos_image)
+                    pixels_intensity = np.sum(cfos_image[mask_image])
+                    sum_pixels_intensity += pixels_intensity
+                    # print(f"pixels_intensity {pixels_intensity}")
+
+                    # area = cv2.contourArea(convert_contours_to_cv2_format(contours))
+            if measure_stat:
+                print(f"Cell {cell_id}: area {sum_areas}, pixels {np.round(sum_pixels_intensity, 2)}, "
+                      f"pixels norm {np.round(sum_pixels_intensity / sum_areas, 2)}")
+                data_dict[cell_id]["cfos"] = (sum_areas, sum_pixels_intensity)
         return data_dict
 
     def get_pg_rois(self, cells_display_key, layer_index):
@@ -359,11 +440,25 @@ class RoisManager:
         self.z_view_widget.update_associated_line(pg_roi=pg_roi, layer=None)
 
     def are_rois_loaded(self):
+        if self.is_pre_computed_data_available() and self.pre_computed_data_not_loaded_yet:
+            return False
         return len(self.rois_by_layer_dict) > 0
 
-    def add_pg_roi(self, contours, layer, add_to_cells_display=True):
+    def add_pg_roi(self, contours, layer, add_to_cells_display=True, force_cell_id=None,
+                   with_layout_update=True):
+        """
+
+        :param contours:
+        :param layer:
+        :param add_to_cells_display:
+        :param force_cell_id: if not None, then the ROI will have as cell_id force_cell_id
+        :return:
+        """
+        # print(f"add_pg_roi contours {contours}")
         display_id = 0
-        if self.active_cell_id is None:
+        if force_cell_id is not None:
+            cell_id = force_cell_id
+        elif self.active_cell_id is None:
             cell_id = self.cell_id
             self.cell_id += 1
         else:
@@ -380,6 +475,10 @@ class RoisManager:
             self.cells_dict[cell_id] = []
         self.cells_dict[cell_id].append(main_roi.roi_id)
 
+        # layer might not be created if data loaded from save_data
+        if layer not in self.rois_by_layer_dict:
+            self.rois_by_layer_dict[layer] = dict()
+
         self.z_view_widget.update_associated_line(pg_roi=main_roi, layer=layer)
         if self.cells_display_keys[display_id] not in self.rois_by_layer_dict[layer]:
             self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]] = []
@@ -388,7 +487,7 @@ class RoisManager:
             self.cells_display_dict[self.cells_display_keys[display_id]].add_pg_roi(main_roi)
         for display_id in np.arange(1, self.n_displays):
             other_roi = PolyLineROI(contours, pen=roi_pen, closed=True, movable=False,
-                                    invisible_handle=False, alterable=False, no_seq_hover_action=True,
+                                    invisible_handle=True, alterable=False, no_seq_hover_action=True,
                                     roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
             other_roi.cell_id = cell_id
             main_roi.link_a_roi(roi_to_link=other_roi)
@@ -398,9 +497,8 @@ class RoisManager:
             if add_to_cells_display:
                 self.cells_display_dict[self.cells_display_keys[display_id]].add_pg_roi(other_roi)
         self.individual_roi_id += 1
-        if self.active_cell_id is None:
-            self._add_cell_button(cell_id=cell_id)
-        self._update_cell_label(cell_id=cell_id)
+        if cell_id not in self.cells_buttons_dict:
+            self._add_cell_button(cell_id=cell_id, with_layout_update=with_layout_update)
 
     def load_rois_coordinates_from_masks(self, mask_imgs):
         # rois c
@@ -421,7 +519,7 @@ class RoisManager:
                 self.rois_by_layer_dict[layer][self.cells_display_keys[display_id]].append(main_roi)
                 for display_id in np.arange(1, self.n_displays):
                     other_roi = PolyLineROI(contour, pen=(6, 9), closed=True, movable=False,
-                                            invisible_handle=False, alterable=False, no_seq_hover_action=True,
+                                            invisible_handle=True, alterable=False, no_seq_hover_action=True,
                                             roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self,
                                             original_centroid=centroids[contour_index])
                     main_roi.link_a_roi(roi_to_link=other_roi)
@@ -505,6 +603,8 @@ class RoisManager:
 
         n_layers = 0
         for layer, rois_in_layer in self.rois_by_layer_dict.items():
+            if "red" not in rois_in_layer:
+                continue
             rois_ids_in_layer = [pg_roi.roi_id for pg_roi in rois_in_layer["red"]]
             if len(np.intersect1d(roi_ids, rois_ids_in_layer)) > 0:
                 n_layers += 1
@@ -516,7 +616,7 @@ class RoisManager:
         return len(self.cells_dict[cell_id])
 
     def _add_cell_button(self, cell_id, with_layout_update=True):
-        cell_button = MyQPushButton(cell_id = cell_id, roi_manager=self)
+        cell_button = MyQPushButton(cell_id=cell_id, roi_manager=self)
 
         # self.cells_buttons_layout.addWidget(cell_button)
         self.cells_buttons_dict[cell_id] = cell_button
@@ -537,7 +637,7 @@ class RoisManager:
         n_rois = self._get_number_of_rois_for_a_cell(cell_id=cell_id)
         cell_n_layers_label.setText(f"{n_layers} / {n_rois}")
 
-    def update_buttons_layout(self):
+    def empty_buttons_layout(self):
         while self.cells_buttons_layout.count() > 0:
             item = self.cells_buttons_layout.itemAt(0)
             item.widget().close()
@@ -548,6 +648,9 @@ class RoisManager:
             item.widget().close()
             self.cells_n_layers_layout.removeItem(item)
 
+    def update_buttons_layout(self):
+        self.empty_buttons_layout()
+
         for cell_id, button in self.cells_buttons_dict.items():
             button.show()
             self.cells_buttons_layout.addWidget(button)
@@ -556,8 +659,24 @@ class RoisManager:
             label.show()
             self.cells_n_layers_layout.addWidget(label)
 
-    def load_pre_computed_coordinates(self, file_name):
-        pass
+    def _erase_all(self):
+        """
+        Erase all data in RoiManager.
+        Useful when we load data that has been saved
+        :return:
+        """
+        if len(self.pg_rois_dict) == 0:
+            print(f"_erase_all {self.rois_manager_id}: no rois")
+            return
+
+        print(f"_erase_all {self.rois_manager_id}: {len(self.pg_rois_dict)} rois")
+        copy_roi_dict = dict()
+        copy_roi_dict.update(self.pg_rois_dict)
+        for roi_id, pg_roi in copy_roi_dict.items():
+            layer = pg_roi.layer_index
+            self.remove_roi(roi_id=roi_id, layer_index=layer)
+        # in case some will still be there
+        self.empty_buttons_layout()
 
     def fusion_rois(self):
         pass
@@ -1175,6 +1294,7 @@ class CentralWidget(QWidget):
                 continue
             roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
                                       z_view_widget=self.z_view_widget,
+                                      images_dict = self.images_dict,
                                       cells_display_keys=cells_display_keys,
                                       cells_buttons_layout=self.cells_buttons_layout,
                                       cells_n_layers_layout=self.cells_n_layers_layout,
@@ -1245,19 +1365,8 @@ class CentralWidget(QWidget):
         Update the Cells buttons layout displayed depending on the images displayed
         :return:
         """
-        # if self.cells_buttons_roi_manager is not None:
-        #     print("Removing cells_buttons_layout")
-        #     cells_buttons_layout = self.cells_buttons_roi_manager.cells_buttons_layout
-        #     self.cells_buttons_roi_manager.hide_buttons()
-        #     self.combo_box_layout.removeItem(cells_buttons_layout)
         roi_manager = self.rois_manager_dict[tuple(self.displayed_image_keys)]
         roi_manager.update_buttons_layout()
-        # self.cells_buttons_roi_manager = roi_manager
-        # cells_buttons_layout = self.cells_buttons_roi_manager.cells_buttons_layout
-        # self.cells_buttons_roi_manager.show_buttons()
-        # print(f"update_cells_buttons_layout {tuple(self.displayed_image_keys)}")
-        # print(f"n buttons {cells_buttons_layout.count()}")
-        # self.combo_box_layout.insertLayout(self.combo_box_layout.count() - 1, cells_buttons_layout)
 
     def save_rois(self):
         """
@@ -1301,7 +1410,8 @@ class CentralWidget(QWidget):
                 # getting data from roi_manager
                 data_to_save[image_keys] = roi_manager.get_contours_data()
             else:
-                pass
+                # getting data from loaded one, not yet activated in the RoiManager
+                data_to_save[image_keys] = self.loaded_data_dict[image_keys]
         # print(f"data_to_save {data_to_save}")
         with open(file_name, 'wb') as f:
             pickle.dump(data_to_save, f, pickle.HIGHEST_PROTOCOL)
@@ -1339,8 +1449,25 @@ class CentralWidget(QWidget):
         file_name = file_dialog.selectedFiles()[0]
         with open(file_name, 'rb') as f:
             self.loaded_data_dict = pickle.load(f)
+            self._update_data_from_loaded_one()
             # TODO: update ROIs and colors of combo_boxes
 
+    def _update_data_from_loaded_one(self):
+        """
+        Use information in self.loaded_data_dict to update the display or ROIs and combo_boxes
+        :return:
+        """
+        for image_keys, data_dict in self.loaded_data_dict.items():
+            if image_keys in self.rois_manager_dict:
+                # updating roi_manager (will update the buttons and the images display)
+                roi_manager = self.rois_manager_dict[image_keys]
+                roi_manager.set_pre_computed_coordinates(data_dict=data_dict)
+                # updating the combo_box
+        # updating the current selected combo_box if loaded data is now available
+        self.displayed_image_keys = self.combo_box.get_value()
+        roi_manager = self._get_rois_manager(tuple(self.displayed_image_keys))
+        if roi_manager.is_pre_computed_data_available():
+            self.display_selected_field()
 
     def status_color_fct(self, status_image_keys):
         """
@@ -1351,6 +1478,7 @@ class CentralWidget(QWidget):
         """
         image_keys_to_checked = []
         for image_keys in self.all_image_keys:
+            # for each status_image_keys we check if it is included in the image_keys
             status_image_keys_in = True
             for index, status_image_key in enumerate(status_image_keys):
                 if status_image_key != image_keys[index]:
@@ -1362,14 +1490,18 @@ class CentralWidget(QWidget):
         if len(image_keys_to_checked) == 0:
             return "red"
         at_least_one_not_displayed = False
+        at_least_one_without_saved_data_available = False
         for image_keys in image_keys_to_checked:
             roi_manager = self.rois_manager_dict[image_keys]
-            if not roi_manager.are_rois_loaded():
+            if not roi_manager.are_rois_loaded() and (not roi_manager.is_pre_computed_data_available()):
                 at_least_one_not_displayed = True
+            if not roi_manager.is_pre_computed_data_available():
+                at_least_one_without_saved_data_available = True
         if at_least_one_not_displayed:
             return "red"
-        return "green"
-
+        if at_least_one_without_saved_data_available:
+            return "green"
+        return "orange"
 
     def layer_value_changed(self, value):
         """
@@ -1385,6 +1517,7 @@ class CentralWidget(QWidget):
     def add_pg_roi(self, pos, image_keys):
         roi_manager = self.rois_manager_dict[tuple(image_keys)]
         size_half_square = 5
+        # create a new ROI with a square shape
         contours = list()
         contours.append([pos[0]-size_half_square, pos[1]+size_half_square])
         contours.append([pos[0]+size_half_square, pos[1]+size_half_square])
@@ -1417,13 +1550,16 @@ class CentralWidget(QWidget):
         # TODO: load roi manage from saved contours
         roi_manager = self.rois_manager_dict[image_keys]
         if not roi_manager.are_rois_loaded():
-            # if not yet loaded then we load the rois from the mask data
-            data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
-            mask_imgs = get_image_from_tiff(file_name=data_dict["mask"])
-            roi_manager.load_rois_coordinates_from_masks(mask_imgs=mask_imgs)
+            # first we check is saved data has been loaded, then we use it
+            if roi_manager.is_pre_computed_data_available():
+                roi_manager.load_saved_data()
+            else:
+                # if not yet loaded then we load the rois from the mask data
+                data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=self.images_dict)
+                mask_imgs = get_image_from_tiff(file_name=data_dict["mask"])
+                roi_manager.load_rois_coordinates_from_masks(mask_imgs=mask_imgs)
 
         return roi_manager
-
 
     def display_selected_field(self):
         """
@@ -1809,12 +1945,22 @@ def get_contours_from_mask_img(mask_img):
     if len(mask_with_contours.shape) < 3:
         mask_with_contours = np.reshape(mask_with_contours, (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
     # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    """
+    https://stackoverflow.com/questions/39475125/compatibility-issue-with-contourarea-in-opencv-3
+    in OpenCV 3.4.X, cv2.findContours() returns 3 items
+
+    image, contours, hierarchy = cv2.findContours()
+    In OpenCV 2.X and 4.1.X, cv2.findContours() returns 2 items
+    
+    """
     contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     # CHAIN_APPROX_SIMPLE CHAIN_APPROX_TC89_L1
 
     coord_contours = []
     centroids = []
-    for contour in contours:
+    for contour_index, contour in enumerate(contours):
+        # if contour_index < 2:
+        #     print(f"contour {contour}")
         area = cv2.contourArea(contour)
         # perimeter = cv2.arcLength(contour, True)
         # Contour approximation
@@ -1841,6 +1987,19 @@ def get_contours_from_mask_img(mask_img):
 
     return coord_contours, centroids
 
+def convert_contours_to_cv2_format(contours):
+    """
+    Take a list of tuple of 2 values (x, y) and transform it in a shape compatible with cv2
+    :param contours:
+    :return:
+    """
+    cv2_contours = []
+
+    for xy in contours:
+        cv2_contours.append([[int(xy[0]), int(xy[1])]])
+    print(f'cv2_contours {np.array(cv2_contours)}')
+    return np.array(cv2_contours)
+
 class PlanMask:
 
     def __init__(self, mask_data, mask_id, result_path):
@@ -1854,10 +2013,6 @@ class PlanMask:
         # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) #
         contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         self.all_contours = contours
-        # print(f"contours len {len(contours)}")
-        # for contour in contours:
-        #     print(f"contour shape {contour.shape}")
-        # print(f"contours {contours}")
         self.n_cells = len(self.all_contours)
         # print(f"contours {contours}")
         # Draw all contours
