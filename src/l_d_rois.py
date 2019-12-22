@@ -758,12 +758,20 @@ class ROI(GraphicsObject):
             remAct.triggered.connect(self.removeClicked)
             self.menu.addAction(remAct)
             self.menu.remAct = remAct
+
+            copyAct = QtGui.QAction("Copy ROI", self.menu)
+            copyAct.triggered.connect(self.copyClicked)
+            self.menu.addAction(copyAct)
+            self.menu.copyAct = copyAct
         return self.menu
 
     def removeClicked(self):
         ## Send remove event only after we have exited the menu event handler
         QtCore.QTimer.singleShot(0, lambda: self.sigRemoveRequested.emit(self))
         self.roi_manager.remove_roi(roi_id=self.roi_id, layer_index=self.layer_index)
+
+    def copyClicked(self):
+        self.roi_manager.copy_roi(pg_roi=self)
 
     def mouseDragEvent(self, ev):
         for link_roi in self.linked_rois:
@@ -815,6 +823,9 @@ class ROI(GraphicsObject):
             for link_roi in self.linked_rois:
                 link_roi.mouseClickEvent(ev)
             ev.ignore()
+            if len(self.linked_rois) > 0:
+                # sending signal only from the main roi (the one with other rois linked to it)
+                self.roi_manager.pg_roi_clicked(pg_roi=self)
 
     def cancelMove(self):
         self.isMoving = False
