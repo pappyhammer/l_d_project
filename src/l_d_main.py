@@ -25,6 +25,7 @@ BREWER_COLORS = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c
                  '#74add1', '#4575b4', '#313695']
 DEFAULT_ROI_PEN_WIDTH = 10
 
+
 # class ZStackImages
 
 def get_image_from_tiff(file_name):
@@ -45,7 +46,6 @@ def get_image_from_tiff(file_name):
         layer_data = ImageSequence.Iterator(im)[0]
         n_frames = len(list(ImageSequence.Iterator(im)))
         dim_y, dim_x = np.array(im).shape
-
 
     # print(f"layer_data.shape {layer_data.shape}, np.max {np.max(layer_data)}, np.min{np.max(layer_data)}")
     return layer_data
@@ -75,7 +75,7 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
         # typical file_name red-GroupA-F1-dors-s1-dist.tif
         for file_name in file_names:
             index_group = file_name.index("-")
-            file_name_cropped = file_name[index_group+1:]
+            file_name_cropped = file_name[index_group + 1:]
             index_f = file_name_cropped.index("-")
             group = file_name_cropped[:index_f]
             if group not in results_dict:
@@ -225,11 +225,11 @@ class RoisManager:
         self._erase_all()
         for cell_id, layer_dict in self.pre_computed_data.items():
             for layer, contours in layer_dict.items():
-                print(f"load_saved_data cell {cell_id}, layer {layer} {len(contours)} contours")
                 for contour in contours:
                     self.add_pg_roi(contours=contour, layer=layer, force_cell_id=cell_id, add_to_cells_display=False,
                                     with_layout_update=False)
-        self.update_buttons_layout()
+            self._update_cell_label(cell_id=cell_id)
+        # self.update_buttons_layout()
 
     def copy_roi(self, pg_roi):
         """
@@ -260,18 +260,14 @@ class RoisManager:
         the value is a list of list of tuples of 2 int representing x, y for each roi of the layer
         :return:
         """
-        images_data_dict = get_data_in_dict_from_keys(list_keys=tuple(self.rois_manager_id), data_dict=self.images_dict)
-        cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
-
-        # TODO: Build a function to get measure_stat from file outside of the GUI
-        measure_stat = False
+        # images_data_dict = get_data_in_dict_from_keys(list_keys=tuple(self.rois_manager_id), data_dict=self.images_dict)
+        # cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
 
         data_dict = dict()
         for cell_id, roi_ids in self.cells_dict.items():
             if cell_id not in data_dict:
                 data_dict[cell_id] = dict()
-            sum_areas = 0
-            sum_pixels_intensity = 0
+
             for roi_id in roi_ids:
                 pg_roi = self.pg_rois_dict[roi_id]
                 layer = pg_roi.layer_index
@@ -285,33 +281,6 @@ class RoisManager:
                             handle_name_positions]
                 data_dict[cell_id][layer].append(contours)
 
-                # adding pixels intensity and contour area
-                if measure_stat:
-                    cfos_image = cfos_images[layer]
-                    # building pixel mask from the contours
-                    # converting contours as array and value as integers
-                    contours_array = np.zeros((2, len(contours)), dtype="int16")
-                    for contour_index, contour in enumerate(contours):
-                        contours_array[0, contour_index] = int(contour[0])
-                        contours_array[1, contour_index] = int(contour[1])
-                    mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
-                    # morphology.binary_fill_holes(input
-                    mask_image[contours_array[1, :], contours_array[0, :]] = True
-                    area = np.sum(mask_image)
-                    sum_areas += area
-                    # print(f"Cell {cell_id} layer {layer}: area {area}")
-                    # normalizing cfos image, z_score
-                    cfos_image = cfos_image - np.mean(cfos_image)
-                    cfos_image = cfos_image / np.std(cfos_image)
-                    pixels_intensity = np.sum(cfos_image[mask_image])
-                    sum_pixels_intensity += pixels_intensity
-                    # print(f"pixels_intensity {pixels_intensity}")
-
-                    # area = cv2.contourArea(convert_contours_to_cv2_format(contours))
-            if measure_stat:
-                print(f"Cell {cell_id}: area {sum_areas}, pixels {np.round(sum_pixels_intensity, 2)}, "
-                      f"pixels norm {np.round(sum_pixels_intensity / sum_areas, 2)}")
-                data_dict[cell_id]["cfos"] = (sum_areas, sum_pixels_intensity)
         return data_dict
 
     def get_pg_rois(self, cells_display_key, layer_index):
@@ -557,7 +526,7 @@ class RoisManager:
                 centroid = np.array(pg_roi.original_centroid)
                 # now looking in other layer for cell close by
                 if layer < self.n_layers - 1:
-                    for other_layer in np.arange(layer+1, self.n_layers):
+                    for other_layer in np.arange(layer + 1, self.n_layers):
                         if main_cells_display_key not in self.rois_by_layer_dict[other_layer]:
                             continue
                         for other_pg_roi in self.rois_by_layer_dict[other_layer][main_cells_display_key]:
@@ -640,13 +609,19 @@ class RoisManager:
     def empty_buttons_layout(self):
         while self.cells_buttons_layout.count() > 0:
             item = self.cells_buttons_layout.itemAt(0)
-            item.widget().close()
-            self.cells_buttons_layout.removeItem(item)
+            # adding the if to avoid this error
+            # QGraphicsScene::removeItem: item 0x7ffe4714f020's scene (0x0) is different from this scene (0x7ffe46c173d0)
+            # if item.scene() != 0:
+            self.cells_buttons_layout.removeWidget(item.widget())
+            item.widget().deleteLater()
+            # item.widget().close()
 
         while self.cells_n_layers_layout.count() > 0:
             item = self.cells_n_layers_layout.itemAt(0)
-            item.widget().close()
-            self.cells_n_layers_layout.removeItem(item)
+            # if item.widget().scene() != 0:
+            self.cells_n_layers_layout.removeWidget(item.widget())
+            item.widget().deleteLater()
+            # item.widget().close()
 
     def update_buttons_layout(self):
         self.empty_buttons_layout()
@@ -666,10 +641,8 @@ class RoisManager:
         :return:
         """
         if len(self.pg_rois_dict) == 0:
-            print(f"_erase_all {self.rois_manager_id}: no rois")
             return
 
-        print(f"_erase_all {self.rois_manager_id}: {len(self.pg_rois_dict)} rois")
         copy_roi_dict = dict()
         copy_roi_dict.update(self.pg_rois_dict)
         for roi_id, pg_roi in copy_roi_dict.items():
@@ -692,6 +665,7 @@ class RoisManager:
 
 class MainWindow(QMainWindow):
     """Main window of the Exploratory GUI"""
+
     def __init__(self):
         super().__init__(parent=None)
 
@@ -748,6 +722,7 @@ class MyQComboBox(QComboBox):
     """
     Special instance of ComboBox allowing to handle change so that it is connected to other combo_boxes
     """
+
     def __init__(self, status_color_fct):
         """
         init
@@ -817,7 +792,6 @@ class MyQComboBox(QComboBox):
         # to make combo_box following the next ones will be updated according to the content at the index 0
         self.next_combo_box.setCurrentIndex(0)
         # self.update_combo_boxes_status()
-
 
 
 class MyQFrame(QFrame):
@@ -969,7 +943,7 @@ class ComboBoxWidget(MyQFrame):
 
         self.combo_boxes = []
         self.add_multiple_combo_boxes(choices_dict=choices, legends=legends,
-                                        index=0, ending_keys=ending_keys)
+                                      index=0, ending_keys=ending_keys)
         if horizontal_display:
             h_box = QHBoxLayout()
         else:
@@ -978,13 +952,13 @@ class ComboBoxWidget(MyQFrame):
         n_boxes_max = 0
         v_box_session_id = QVBoxLayout()
         n_boxes_max = len(self.combo_boxes)
-            # if len(self.combo_boxes) > 1:
-            #     # if more than one session_id, we display the name of the session
-            #     q_label = QLabel(session_id)
-            #     # q_label.setAlignment(Qt.AlignCenter)
-            #     q_label.setWindowFlags(QtCore.Qt.FramelessWindowHint)
-            #     q_label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-            #     v_box_session_id.addWidget(q_label)
+        # if len(self.combo_boxes) > 1:
+        #     # if more than one session_id, we display the name of the session
+        #     q_label = QLabel(session_id)
+        #     # q_label.setAlignment(Qt.AlignCenter)
+        #     q_label.setWindowFlags(QtCore.Qt.FramelessWindowHint)
+        #     q_label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        #     v_box_session_id.addWidget(q_label)
         # if len(self.combo_boxes) > 1:
         #     h_box.addLayout(v_box_session_id)
 
@@ -1026,7 +1000,6 @@ class ComboBoxWidget(MyQFrame):
                 status_color = self.status_color_fct(image_keys)
                 combo_box.setItemIcon(index_combo_box, get_icon_from_color(status_color))
 
-
     def add_multiple_combo_boxes(self, choices_dict, legends, index, ending_keys):
         """
         Allows to add multiple combo boxes, each changing the content of the next one for on given session_id
@@ -1060,7 +1033,7 @@ class ComboBoxWidget(MyQFrame):
             elif isinstance(choice_content, dict) and (index_loop_for == 0):
                 next_combo_box = self.add_multiple_combo_boxes(choices_dict=choice_content,
                                                                legends=legends,
-                                              index=index+1, ending_keys=ending_keys)
+                                                               index=index + 1, ending_keys=ending_keys)
             # elif isinstance(choice_content, list):
             #     next_combo_box = MyQComboBox()
             #     self.combo_boxes.append(next_combo_box)
@@ -1159,6 +1132,7 @@ def get_icon_from_color(color):
     pixmap.fill(QtGui.QColor(color))
     return QtGui.QIcon(pixmap)
 
+
 """
 def get_icon_from_color(color):
     pixmap = QPixmap(100, 100)
@@ -1174,6 +1148,7 @@ if __name__ == '__main__':
     w.show()
     sys.exit(app.exec_())
 """
+
 
 def get_tree_dict_as_a_list(tree_dict):
     """
@@ -1253,14 +1228,14 @@ class CentralWidget(QWidget):
 
         self.cfos_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
                                                   key_image="cfos", central_widget=self,
-                                              id_widget="cfos", main_window=main_window)
+                                                  id_widget="cfos", main_window=main_window)
         self.grid_layout.addWidget(self.cfos_widget, 0, 1)
 
         self.cfos_widget.link_to_view(view=self.cells_widget.view)
 
         self.mask_widget = CellsDisplayMainWidget(current_z=self.current_layer, images_dict=self.images_dict,
                                                   key_image="mask", central_widget=self,
-                                              id_widget="mask", main_window=main_window)
+                                                  id_widget="mask", main_window=main_window)
         self.grid_layout.addWidget(self.mask_widget, 1, 0)
 
         self.mask_widget.link_to_view(view=self.cells_widget.view)
@@ -1294,7 +1269,7 @@ class CentralWidget(QWidget):
                 continue
             roi_manager = RoisManager(rois_manager_id=image_keys, n_displays=3,
                                       z_view_widget=self.z_view_widget,
-                                      images_dict = self.images_dict,
+                                      images_dict=self.images_dict,
                                       cells_display_keys=cells_display_keys,
                                       cells_buttons_layout=self.cells_buttons_layout,
                                       cells_n_layers_layout=self.cells_n_layers_layout,
@@ -1519,10 +1494,10 @@ class CentralWidget(QWidget):
         size_half_square = 5
         # create a new ROI with a square shape
         contours = list()
-        contours.append([pos[0]-size_half_square, pos[1]+size_half_square])
-        contours.append([pos[0]+size_half_square, pos[1]+size_half_square])
-        contours.append([pos[0]+size_half_square, pos[1]-size_half_square])
-        contours.append([pos[0]-size_half_square, pos[1]-size_half_square])
+        contours.append([pos[0] - size_half_square, pos[1] + size_half_square])
+        contours.append([pos[0] + size_half_square, pos[1] + size_half_square])
+        contours.append([pos[0] + size_half_square, pos[1] - size_half_square])
+        contours.append([pos[0] - size_half_square, pos[1] - size_half_square])
 
         roi_manager.add_pg_roi(contours=contours, layer=self.current_layer)
 
@@ -1623,7 +1598,8 @@ class MyViewBox(pg.ViewBox):
 
 class ZViewWidget(pg.PlotWidget):
 
-    def __init__(self, n_layers, current_layer,  images_dict, main_window, width_image, parent, linked_cells_display_widget):
+    def __init__(self, n_layers, current_layer, images_dict, main_window, width_image, parent,
+                 linked_cells_display_widget):
 
         self.view_box = MyViewBox()
 
@@ -1655,11 +1631,11 @@ class ZViewWidget(pg.PlotWidget):
 
         self.view_box.setLimits(xMin=0, xMax=width_image, yMin=-1, yMax=self.n_layers)
         self.pg_plot.setXRange(0, width_image)
-        self.pg_plot.setYRange(0, self.n_layers-1)
+        self.pg_plot.setYRange(0, self.n_layers - 1)
 
         self.pg_plot.setAspectLocked(True)
 
-        self.layer_color_pen = pg.mkPen(color=(0, 0, 255),  width=1)
+        self.layer_color_pen = pg.mkPen(color=(0, 0, 255), width=1)
         self.current_layer_marker = pg.InfiniteLine(pos=[0, self.current_layer], angle=0,
                                                     pen=self.layer_color_pen, movable=False)
         self.pg_plot.addItem(item=self.current_layer_marker)
@@ -1667,12 +1643,11 @@ class ZViewWidget(pg.PlotWidget):
         self.lines_grid = dict()
         # white dot line
         mk_pen = pg.mkPen(color=(255, 255, 255), style=QtCore.Qt.DashLine, width=0.5)
-        for layer in range(self.n_layers-1):
-            grid_line = pg.InfiniteLine(pos=[0, layer+0.5], angle=0,
-                                                    pen=mk_pen, movable=False)
+        for layer in range(self.n_layers - 1):
+            grid_line = pg.InfiniteLine(pos=[0, layer + 0.5], angle=0,
+                                        pen=mk_pen, movable=False)
             self.pg_plot.addItem(item=grid_line)
             self.lines_grid[layer] = grid_line
-
 
         # test_line = pg.InfiniteLine(pos=[100, 0], angle=90,
         #                                             pen=color_pen, movable=False)
@@ -1768,7 +1743,7 @@ class ZViewWidget(pg.PlotWidget):
         left_x = rect_coords[0] + pos_x
         right_x = rect_coords[2] + pos_x
         # calculating y, we center it in the y value corresponding to layer
-        mean_y = (rect_coords[1] + rect_coords[3] + 2*pos_y) / 2
+        mean_y = (rect_coords[1] + rect_coords[3] + 2 * pos_y) / 2
         # scale it from 0 to 1
         y_coord = 1 - (mean_y / self.current_image_height)
         # 0 is 0.5 under the layer
@@ -1807,7 +1782,7 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
     def __init__(self, id_widget, current_z, images_dict, key_image, main_window, central_widget, parent=None):
 
         # self.view_box = MyViewBox()
-        pg.GraphicsLayoutWidget.__init__(self) # viewBox=self.view_box
+        pg.GraphicsLayoutWidget.__init__(self)  # viewBox=self.view_box
         # allows the widget to be expanded in both axis
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -1853,7 +1828,7 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         self._update_display()
 
     def remove_pg_roi(self, pg_roi):
-        self.view.removeItem(pg_roi)
+        self._remove_item_from_view_safe(pg_roi)
 
     def add_pg_roi(self, pg_roi):
         """
@@ -1871,10 +1846,23 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         new_pg_rois = self.roi_manager.get_pg_rois(cells_display_key=self.id_widget, layer_index=self.current_layer)
         if len(self.current_pg_rois) > 0:
             for pg_roi in self.current_pg_rois:
-                self.view.removeItem(pg_roi)
+                self._remove_item_from_view_safe(pg_roi)
         self.current_pg_rois = new_pg_rois
         for pg_roi in self.current_pg_rois:
             self.view.addItem(pg_roi)
+
+    def _remove_item_from_view_safe(self, pg_roi):
+        # modificaiton of the source code of self.view.removeItem(pg_roi)
+        # to avoid this;
+        # QGraphicsScene::removeItem: item 0x7f82f6625f80's scene (0x0) is different from this scene (0x7f82f63418e0)
+        exception_raised = False
+        try:
+            self.view.addedItems.remove(pg_roi)
+        except:
+            exception_raised = True
+        if not exception_raised:
+            self.view.scene().removeItem(pg_roi)
+            self.view.updateAutoRange()
 
     def set_layer(self, layer):
         self.current_layer = layer
@@ -1905,7 +1893,6 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         # putting the new ROI in the middle
         pos = [np.mean(view_range[0]), np.mean(view_range[1])]
         self.central_widget.add_pg_roi(pos=pos, image_keys=self.image_keys)
-
 
     def keyPressEvent(self, event):
         """
@@ -1943,7 +1930,8 @@ def get_contours_from_mask_img(mask_img):
     """
     mask_with_contours = mask_img.copy()
     if len(mask_with_contours.shape) < 3:
-        mask_with_contours = np.reshape(mask_with_contours, (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
+        mask_with_contours = np.reshape(mask_with_contours,
+                                        (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
     # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     """
     https://stackoverflow.com/questions/39475125/compatibility-issue-with-contourarea-in-opencv-3
@@ -1969,7 +1957,7 @@ def get_contours_from_mask_img(mask_img):
         contour = cv2.approxPolyDP(contour, epsilon, True)
         xy = []
         for c in contour:
-            xy.append([c[0][0]+0.5, c[0][1]+0.5])
+            xy.append([c[0][0] + 0.5, c[0][1] + 0.5])
         # removing the contour that take all the frame
         if [0.5, 0.5] in xy:
             continue
@@ -1987,6 +1975,7 @@ def get_contours_from_mask_img(mask_img):
 
     return coord_contours, centroids
 
+
 def convert_contours_to_cv2_format(contours):
     """
     Take a list of tuple of 2 values (x, y) and transform it in a shape compatible with cv2
@@ -2000,6 +1989,7 @@ def convert_contours_to_cv2_format(contours):
     print(f'cv2_contours {np.array(cv2_contours)}')
     return np.array(cv2_contours)
 
+
 class PlanMask:
 
     def __init__(self, mask_data, mask_id, result_path):
@@ -2009,7 +1999,8 @@ class PlanMask:
         # plt.imshow(mask_data)
         # plt.show()
         mask_with_contours = mask_data.copy()
-        mask_with_contours = np.reshape(mask_with_contours, (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
+        mask_with_contours = np.reshape(mask_with_contours,
+                                        (mask_with_contours.shape[0], mask_with_contours.shape[1], 1))
         # contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) #
         contours, hierarchy = cv2.findContours(mask_with_contours, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         self.all_contours = contours
@@ -2045,10 +2036,10 @@ class PlanMask:
                 xy.append([c[0][0], c[0][1]])
             # xy = self.coords[cell].transpose()
             cell_polygon = patches.Polygon(xy=xy,
-                                                fill=False, linewidth=1,
-                                                facecolor=None,
-                                                edgecolor="yellow",
-                                                zorder=10)  # lw=2
+                                           fill=False, linewidth=1,
+                                           facecolor=None,
+                                           edgecolor="yellow",
+                                           zorder=10)  # lw=2
             ax.add_patch(cell_polygon)
 
         if isinstance(save_formats, str):
@@ -2076,6 +2067,73 @@ def main():
         plan_mask.plot_with_contours()
 
 
+def analyse_manual_data():
+    """
+    Analyse the data that has been saved using the GUI
+    :return:
+    """
+    root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+    # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+
+    result_path = os.path.join(root_path, "results_ld")
+
+    pickle_file_name = os.path.join(root_path, "test", "draft.pkl")
+
+    with open(pickle_file_name, 'rb') as f:
+        loaded_data_dict = pickle.load(f)
+
+    n_layers = 7
+
+    mask_dir_path = os.path.join(root_path, "masques")
+    red_dir_path = os.path.join(root_path, "cellules (red)")
+    cfos_dir_path = os.path.join(root_path, "cfos (green)")
+
+    images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
+                                 mask_dir_path=mask_dir_path)
+
+    all_image_keys = get_tree_dict_as_a_list(images_dict)
+    # removing the two last keys which are like "mask", "red" and the tiffs file_name
+    all_image_keys = set([tuple(images[:-2]) for images in all_image_keys])
+
+    for image_keys, pre_computed_data in loaded_data_dict.items():
+        images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
+        cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
+
+        for cell_id, layer_dict in pre_computed_data.items():
+            sum_areas = 0
+            sum_pixels_intensity = 0
+            for layer, all_contours in layer_dict.items():
+                for contours in all_contours:
+                    cfos_image = cfos_images[layer]
+                    # building pixel mask from the contours
+                    # converting contours as array and value as integers
+                    contours_array = np.zeros((2, len(contours)), dtype="int16")
+                    for contour_index, coord in enumerate(contours):
+                        contours_array[0, contour_index] = int(coord[0])
+                        contours_array[1, contour_index] = int(coord[1])
+                    mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
+                    # morphology.binary_fill_holes(input
+                    mask_image[contours_array[1, :], contours_array[0, :]] = True
+                    check_pos_by_plotting = False
+                    if check_pos_by_plotting:
+                        fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
+                        fig.canvas.set_window_title(f"cell {cell_id}, layer {layer}")
+                        ax1.imshow(mask_image)
+                        # plt.show()
+                        ax2.imshow(cfos_image)
+                        plt.show()
+                    area = np.sum(mask_image)
+                    sum_areas += area
+
+                    # normalizing cfos image, z_score
+                    cfos_image = cfos_image - np.mean(cfos_image)
+                    cfos_image = cfos_image / np.std(cfos_image)
+
+                    pixels_intensity = np.sum(cfos_image[mask_image])
+                    sum_pixels_intensity += pixels_intensity
+            print(f"Cell {cell_id}: area {sum_areas}, pixels {np.round(sum_pixels_intensity, 2)}, "
+                  f"pixels norm {np.round(sum_pixels_intensity / sum_areas, 2)}")
+
 
 def load_mask(masks_path, mask_id):
     """
@@ -2098,6 +2156,7 @@ def load_mask(masks_path, mask_id):
     #     # for index in np.arange(layer_data.shape[0]):
     #     #     mask_data[layer_index * layer_data.shape[0] + index] = layer_data[index]
     return layer_data
+
 
 def main_gui():
     app = QApplication(sys.argv)
@@ -2138,6 +2197,8 @@ def main_gui():
 
     sys.exit(app.exec_())
 
+
 if __name__ == "__main__":
     main_gui()
+    # analyse_manual_data()
     # main()
