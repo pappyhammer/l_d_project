@@ -600,6 +600,27 @@ class RoisManager:
         if with_layout_update:
             self.update_buttons_layout()
 
+    def _update_buttons_and_labels(self):
+        """
+        Used to re-create buttons after they have been deleted using deleteLater()
+        Returns:
+
+        """
+        cell_ids = list(self.cells_buttons_dict.keys())
+        for cell_id in cell_ids:
+            cell_button = MyQPushButton(cell_id=cell_id, roi_manager=self)
+
+            # self.cells_buttons_layout.addWidget(cell_button)
+            self.cells_buttons_dict[cell_id] = cell_button
+
+            cell_n_layers_label = QLabel()
+            cell_n_layers_label.setAlignment(Qt.AlignCenter)
+            cell_n_layers_label.setWindowFlags(QtCore.Qt.FramelessWindowHint)
+            cell_n_layers_label.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+            cell_n_layers_label.setToolTip(f"N layers & N ROIs for cell {cell_id}")
+            self.cell_n_layers_label_dict[cell_id] = cell_n_layers_label
+            self._update_cell_label(cell_id=cell_id)
+
     def _update_cell_label(self, cell_id):
         cell_n_layers_label = self.cell_n_layers_label_dict[cell_id]
         n_layers = self._get_cell_n_layers(cell_id=cell_id)
@@ -633,10 +654,8 @@ class RoisManager:
             # item.widget().close()
 
     def update_buttons_layout(self):
-        # print("RoisManager update_buttons_layout()")
         self.empty_buttons_layout()
-        # print(" self.empty_buttons_layout() done")
-
+        self._update_buttons_and_labels()
         for cell_id, button in self.cells_buttons_dict.items():
             button.show()
             self.cells_buttons_layout.addWidget(button)
