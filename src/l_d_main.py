@@ -127,14 +127,14 @@ class MyQPushButton(QPushButton):
         QPushButton.__init__(self, str(cell_id))
         self.setToolTip(f"Cell {cell_id}")
         self.clicked.connect(self._button_action)
-        self.setStyleSheet(f"background-color:{self.cells_color[cell_id]}; color:black;")
+        self.setStyleSheet(f"background-color:{self.cells_color[cell_id%len(self.cells_color)]}; color:black;")
         self.activated = False
 
     def change_activation_status(self):
         if self.activated:
-            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id]}; color:black;")
+            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id%len(self.cells_color)]}; color:black;")
         else:
-            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id]}; color:white;")
+            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id%len(self.cells_color)]}; color:white;")
         self.activated = not self.activated
 
     def _button_action(self):
@@ -434,7 +434,7 @@ class RoisManager:
             # if a button is active, the ROI is part of the button cell
             cell_id = self.active_cell_id
         # white : (255, 255, 255)
-        roi_pen = pg.mkPen(color=self.cells_color[cell_id], width=DEFAULT_ROI_PEN_WIDTH)
+        roi_pen = pg.mkPen(color=self.cells_color[cell_id % len(self.cells_color)], width=DEFAULT_ROI_PEN_WIDTH)
         main_roi = PolyLineROI(contours, pen=roi_pen, closed=True, movable=True,
                                invisible_handle=False, alterable=True, no_seq_hover_action=False,
                                roi_id=self.individual_roi_id, layer_index=layer, roi_manager=self)
@@ -551,7 +551,7 @@ class RoisManager:
             for display_key in self.rois_by_layer_dict[layer]:
                 for pg_roi in self.rois_by_layer_dict[layer][display_key]:
                     cell_id = pg_roi.cell_id
-                    color = self.cells_color[cell_id]
+                    color = self.cells_color[cell_id % len(self.cells_color)]
                     roi_pen = pg.mkPen(color=color, width=DEFAULT_ROI_PEN_WIDTH)
                     pg_roi.setPen(roi_pen)
                     self.z_view_widget.update_line_color(pg_roi=pg_roi)
@@ -607,24 +607,35 @@ class RoisManager:
         cell_n_layers_label.setText(f"{n_layers} / {n_rois}")
 
     def empty_buttons_layout(self):
-        while self.cells_buttons_layout.count() > 0:
-            item = self.cells_buttons_layout.itemAt(0)
-            # adding the if to avoid this error
-            # QGraphicsScene::removeItem: item 0x7ffe4714f020's scene (0x0) is different from this scene (0x7ffe46c173d0)
-            # if item.scene() != 0:
-            self.cells_buttons_layout.removeWidget(item.widget())
+        for i in np.arange(self.cells_buttons_layout.count()):
+            item = self.cells_buttons_layout.itemAt(i)
             item.widget().deleteLater()
-            # item.widget().close()
+        # while self.cells_buttons_layout.count() > 0:
+        #     item = self.cells_buttons_layout.itemAt(0)
+        #     # adding the if to avoid this error
+        #     # QGraphicsScene::removeItem: item 0x7ffe4714f020's scene (0x0) is different from this scene (0x7ffe46c173d0)
+        #     # if item.scene() != 0:
+        #     self.cells_buttons_layout.removeWidget(item.widget())
+        #     # crash here
+        #     item.widget().deleteLater()
+        #     print("After deleteLater")
+        #     # item.widget().close()
+        # print(f"self.cells_buttons_layout.count() {self.cells_buttons_layout.count()}")
+        for i in np.arange(self.cells_n_layers_layout.count()):
+            item = self.cells_n_layers_layout.itemAt(i)
+            item.widget().deleteLater()
+        # while self.cells_n_layers_layout.count() > 0:
+        #     item = self.cells_n_layers_layout.itemAt(0)
+        #     # if item.widget().scene() != 0:
+        #     self.cells_n_layers_layout.removeWidget(item.widget())
+        #     item.widget().deleteLater()
 
-        while self.cells_n_layers_layout.count() > 0:
-            item = self.cells_n_layers_layout.itemAt(0)
-            # if item.widget().scene() != 0:
-            self.cells_n_layers_layout.removeWidget(item.widget())
-            item.widget().deleteLater()
             # item.widget().close()
 
     def update_buttons_layout(self):
+        # print("RoisManager update_buttons_layout()")
         self.empty_buttons_layout()
+        # print(" self.empty_buttons_layout() done")
 
         for cell_id, button in self.cells_buttons_dict.items():
             button.show()
@@ -1183,8 +1194,8 @@ class CentralWidget(QWidget):
     def __init__(self, main_window):
         super().__init__(parent=main_window)
 
-        root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-        # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+        # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+        root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
 
         result_path = os.path.join(root_path, "results_ld")
 
@@ -1544,12 +1555,12 @@ class CentralWidget(QWidget):
 
         self.displayed_image_keys = self.combo_box.get_value()
         roi_manager = self._get_rois_manager(tuple(self.displayed_image_keys))
-        # print(f"image_keys {image_keys}")
         for cells_display_widget in self.cells_display_widgets:
             cells_display_widget.set_images(self.displayed_image_keys, roi_manager)
         # now we update colors
         roi_manager.update_colors()
         self.combo_box.update_combo_boxes_status()
+        # crash here
         self.update_cells_buttons_layout()
 
 
@@ -1710,7 +1721,7 @@ class ZViewWidget(pg.PlotWidget):
                 self.update_associated_line(pg_roi, layer)
 
     def update_line_color(self, pg_roi):
-        color = self.cells_color[pg_roi.cell_id]
+        color = self.cells_color[pg_roi.cell_id % len(self.cells_color)]
         line_sgt = self.line_segments_rois[pg_roi.roi_id]
         line_pen = pg.mkPen(color=color, width=4)
         line_sgt.setPen(line_pen)
@@ -1749,7 +1760,7 @@ class ZViewWidget(pg.PlotWidget):
         # 0 is 0.5 under the layer
         y_coord = layer - 0.5 + y_coord
 
-        color = self.cells_color[pg_roi.cell_id]
+        color = self.cells_color[pg_roi.cell_id % len(self.cells_color)]
         line_pen = pg.mkPen(color=color, width=4)
         line_sgt = pg.LineSegmentROI([[left_x, y_coord], [right_x, y_coord]], pen=line_pen)
 
