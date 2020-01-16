@@ -19,6 +19,8 @@ from sortedcontainers import SortedDict
 from l_d_rois import PolyLineROI
 import pickle
 
+# TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
+
 BREWER_COLORS = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f',
                  '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#a50026', '#d73027',
                  '#f46d43', '#fdae61', '#fee090', '#ffffbf', '#e0f3f8', '#abd9e9',
@@ -115,6 +117,8 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
                 print(f"depth_value {depth_value}")
                 print("")
             results_dict[group][f_value][pos_value][s_value][depth_value][tiff_key] = os.path.join(dir_path, file_name)
+            # if group == "GroupA" and f_value == "N1" and pos_value == "ventr":
+            #     print(f"{[group, f_value, pos_value, s_value, depth_value, tiff_key]} {file_name}")
     return results_dict
 
 
@@ -247,8 +251,8 @@ class RoisManager:
         """
         if self.copied_roi is None:
             return
-        if self.copied_roi.layer_index == layer:
-            return
+        # if self.copied_roi.layer_index == layer:
+        #     return
         handle_name_positions = self.copied_roi.getLocalHandlePositions()
         contours = [handle_name_pos[1] for handle_name_pos in handle_name_positions]
         self.add_pg_roi(contours=contours, layer=layer)
@@ -468,6 +472,8 @@ class RoisManager:
         self.individual_roi_id += 1
         if cell_id not in self.cells_buttons_dict:
             self._add_cell_button(cell_id=cell_id, with_layout_update=with_layout_update)
+        else:
+            self._update_cell_label(cell_id=cell_id)
 
     def load_rois_coordinates_from_masks(self, mask_imgs):
         # rois c
@@ -609,6 +615,9 @@ class RoisManager:
         cell_ids = list(self.cells_buttons_dict.keys())
         for cell_id in cell_ids:
             cell_button = MyQPushButton(cell_id=cell_id, roi_manager=self)
+            if self.active_cell_id is not None:
+                if cell_id == self.active_cell_id:
+                    cell_button.change_activation_status()
 
             # self.cells_buttons_layout.addWidget(cell_button)
             self.cells_buttons_dict[cell_id] = cell_button
@@ -620,6 +629,11 @@ class RoisManager:
             cell_n_layers_label.setToolTip(f"N layers & N ROIs for cell {cell_id}")
             self.cell_n_layers_label_dict[cell_id] = cell_n_layers_label
             self._update_cell_label(cell_id=cell_id)
+
+        if self.active_cell_id is not None:
+            if self.active_cell_id not in cell_ids:
+                # then no cell is active
+                self.active_cell_id = None
 
     def _update_cell_label(self, cell_id):
         cell_n_layers_label = self.cell_n_layers_label_dict[cell_id]
@@ -654,6 +668,8 @@ class RoisManager:
             # item.widget().close()
 
     def update_buttons_layout(self):
+        # removing previous selection if there was one
+        # self.active_cell_id = None
         self.empty_buttons_layout()
         self._update_buttons_and_labels()
         for cell_id, button in self.cells_buttons_dict.items():
@@ -696,7 +712,7 @@ class RoisManager:
 class MainWindow(QMainWindow):
     """Main window of the Exploratory GUI"""
 
-    def __init__(self):
+    def __init__(self, mask_dir_path, red_dir_path, cfos_dir_path):
         super().__init__(parent=None)
 
         self.setWindowTitle("cFos GUI")
@@ -709,7 +725,8 @@ class MainWindow(QMainWindow):
         self.resize(width_window, height_window)
 
         ## creating widgets to put in the window
-        self.central_widget = CentralWidget(main_window=self)
+        self.central_widget = CentralWidget(main_window=self, mask_dir_path=mask_dir_path,
+                                            red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path)
         self.setCentralWidget(self.central_widget)
 
         self.show()
@@ -753,11 +770,13 @@ class MyQComboBox(QComboBox):
     Special instance of ComboBox allowing to handle change so that it is connected to other combo_boxes
     """
 
-    def __init__(self, status_color_fct):
+    def __init__(self, root_choices, status_color_fct):
         """
         init
         """
         QComboBox.__init__(self)
+        # represents all choices available
+        self.root_choices = root_choices
         self.next_combo_box = None
         self.previous_combo_box = None
         self.status_color_fct = status_color_fct
@@ -814,14 +833,39 @@ class MyQComboBox(QComboBox):
         self.next_combo_box.clear()
         # adding new ones
         for choice_id in content_next_combo_box.keys():
+            list_keys = self.get_previous_combo_boxes_content(self.currentIndex()) + [str(choice_id)]
+
+            # first we make sure this choice_id exists in the tree
+            if not check_if_list_of_keys_exists(list_keys=list_keys, my_dict=self.root_choices):
+                continue
+
             # need to put 2 arguments, in order to be able to find it using findData
             # self.next_combo_box.addItem(str(choice_id), str(choice_id))
-            status_color = self.status_color_fct(self.get_previous_combo_boxes_content(self.currentIndex())
-                                                 + [str(choice_id)])
+            status_color = self.status_color_fct(list_keys)
             self.next_combo_box.addItem(get_icon_from_color(status_color), str(choice_id))
         # to make combo_box following the next ones will be updated according to the content at the index 0
         self.next_combo_box.setCurrentIndex(0)
         # self.update_combo_boxes_status()
+
+def check_if_list_of_keys_exists(list_keys, my_dict):
+    """
+    Return True if the list of keys allows to open succesive dictionnaries based on my_dict
+    Args:
+        list_keys: list of keys (string, int)
+        my_dict:
+
+    Returns:
+
+    """
+    if len(list_keys) == 0:
+        return True
+
+    if not isinstance(my_dict, SortedDict):
+        return False
+
+    if list_keys[0] in my_dict:
+        return check_if_list_of_keys_exists(list_keys[1:], my_dict[list_keys[0]])
+    return False
 
 
 class MyQFrame(QFrame):
@@ -949,6 +993,7 @@ class ComboBoxWidget(MyQFrame):
         """
         MyQFrame.__init__(self, parent=parent)
 
+        self.original_choices = choices
         self.combo_boxes = dict()
         self.status_color_fct = status_color_fct
 
@@ -1052,18 +1097,21 @@ class ComboBoxWidget(MyQFrame):
             if (ending_keys is not None) and (choice_id in ending_keys):
                 continue
             if combo_box is None:
-                combo_box = MyQComboBox(status_color_fct=self.status_color_fct)
+                combo_box = MyQComboBox(root_choices = self.original_choices, status_color_fct=self.status_color_fct)
                 self.combo_boxes.append(combo_box)
-            # need to put 2 arguments, in order to be able to find it using findData
-            # combo_box.addItem(str(choice_id), str(choice_id))
             combo_box.addItem(get_icon_from_color("red"), str(choice_id))
 
             if choice_content is None:
                 continue
             elif isinstance(choice_content, dict) and (index_loop_for == 0):
-                next_combo_box = self.add_multiple_combo_boxes(choices_dict=choice_content,
-                                                               legends=legends,
-                                                               index=index + 1, ending_keys=ending_keys)
+                if choice_id in choice_content:
+                    # to solve a bug i don't understand
+                    choice_content = choice_content[choice_id]
+                next_combo_box_tmp = self.add_multiple_combo_boxes(choices_dict=choice_content,
+                                                                   legends=legends,
+                                                                   index=index + 1, ending_keys=ending_keys)
+                if next_combo_box is None:
+                    next_combo_box = next_combo_box_tmp
             # elif isinstance(choice_content, list):
             #     next_combo_box = MyQComboBox()
             #     self.combo_boxes.append(next_combo_box)
@@ -1082,6 +1130,7 @@ class ComboBoxWidget(MyQFrame):
                 combo_box.setToolTip(legends)
             else:
                 combo_box.setToolTip(legends[index])
+
         combo_box.choices_dict = choices_dict
         combo_box.next_combo_box = next_combo_box
         if next_combo_box is not None:
@@ -1210,22 +1259,14 @@ def get_tree_dict_as_a_list(tree_dict):
 
 class CentralWidget(QWidget):
 
-    def __init__(self, main_window):
+    def __init__(self, main_window, mask_dir_path, red_dir_path, cfos_dir_path):
         super().__init__(parent=main_window)
-
-        # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-        root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
-
-        result_path = os.path.join(root_path, "results_ld")
-
-        mask_dir_path = os.path.join(root_path, "masques")
-        red_dir_path = os.path.join(root_path, "cellules (red)")
-        cfos_dir_path = os.path.join(root_path, "cfos (green)")
 
         self.images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
                                           mask_dir_path=mask_dir_path)
 
         self.all_image_keys = get_tree_dict_as_a_list(self.images_dict)
+
         # removing the two last keys which are like "mask", "red" and the tiffs file_name
         self.all_image_keys = set([tuple(images[:-2]) for images in self.all_image_keys])
         # raise Exception("KING IN THE NORTH")
@@ -1529,6 +1570,22 @@ class CentralWidget(QWidget):
         contours.append([pos[0] + size_half_square, pos[1] - size_half_square])
         contours.append([pos[0] - size_half_square, pos[1] - size_half_square])
 
+        # from https://stackoverflow.com/questions/32092899/plot-equation-showing-a-circle/32093458
+        # theta goes from 0 to 2pi
+        n_points = 10
+        theta = np.linspace(0, 2 * np.pi, n_points)
+
+        # the radius of the circle
+        r = np.sqrt(30)
+
+        # compute x1 and x2
+        x_values = r * np.cos(theta) + pos[0]
+        y_values = r * np.sin(theta) + pos[1]
+
+        contours = list()
+        for x_value, y_value in zip(x_values, y_values):
+            contours.append([x_value, y_value])
+
         roi_manager.add_pg_roi(contours=contours, layer=self.current_layer)
 
     def change_layer(self, increment):
@@ -1579,7 +1636,6 @@ class CentralWidget(QWidget):
         # now we update colors
         roi_manager.update_colors()
         self.combo_box.update_combo_boxes_status()
-        # crash here
         self.update_cells_buttons_layout()
 
 
@@ -2082,41 +2138,16 @@ class PlanMask:
         plt.close()
 
 
-def main():
-    root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-    # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
-    result_path = os.path.join(root_path, "results_ld")
-
-    masks_path = os.path.join(root_path, "masques")
-
-    mask_id = "red-GroupA-F1-dors-s1-dist"
-    mask_data = load_mask(masks_path=masks_path, mask_id=mask_id)
-
-    for index in range(len(mask_data)):
-        plan_mask = PlanMask(mask_data=mask_data[index], result_path=result_path, mask_id=mask_id + f"_{index}")
-        plan_mask.plot_with_contours()
-
-
-def analyse_manual_data():
+def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path):
     """
     Analyse the data that has been saved using the GUI
     :return:
     """
-    root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
-    # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
-
-    result_path = os.path.join(root_path, "results_ld")
-
-    pickle_file_name = os.path.join(root_path, "test", "draft.pkl")
-
     with open(pickle_file_name, 'rb') as f:
         loaded_data_dict = pickle.load(f)
 
     n_layers = 7
 
-    mask_dir_path = os.path.join(root_path, "masques")
-    red_dir_path = os.path.join(root_path, "cellules (red)")
-    cfos_dir_path = os.path.join(root_path, "cfos (green)")
 
     images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
                                  mask_dir_path=mask_dir_path)
@@ -2188,7 +2219,7 @@ def load_mask(masks_path, mask_id):
     return layer_data
 
 
-def main_gui():
+def main_gui(mask_dir_path, red_dir_path, cfos_dir_path):
     app = QApplication(sys.argv)
 
     # set the environment variable to use a specific wrapper
@@ -2215,7 +2246,7 @@ def main_gui():
 
     # config_handler = ConfigHandler()
 
-    main_window = MainWindow()
+    main_window = MainWindow(mask_dir_path, red_dir_path, cfos_dir_path)
 
     # putting the window at the center of the screen
     # screenGeometry is an instance of Qrect
@@ -2229,6 +2260,24 @@ def main_gui():
 
 
 if __name__ == "__main__":
-    main_gui()
-    # analyse_manual_data()
-    # main()
+    # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
+    # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
+    root_path = None
+    with open("rosie_config.txt", "r", encoding='UTF-8') as file:
+        for nb_line, line in enumerate(file):
+            line_list = line.split('=')
+            root_path = line_list[1]
+    if root_path is None:
+        raise Exception("Root path is None")
+
+    mask_dir_path = os.path.join(root_path, "masques")
+    red_dir_path = os.path.join(root_path, "cellules (red)")
+    cfos_dir_path = os.path.join(root_path, "cfos (green)")
+
+    result_path = os.path.join(root_path, "results_ld")
+
+    pickle_file_name = os.path.join(result_path, "rosie_rois.pkl")
+
+
+    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path)
