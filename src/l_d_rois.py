@@ -370,7 +370,7 @@ class ROI(GraphicsObject):
         finish = kargs.get('finish', True)
         self.setPos(newState['pos'], update=update, finish=finish)
         # if 'update' not in kargs or kargs['update'] is True:
-        # self.stateChanged()
+        #     self.stateChanged()
         for link_roi in self.linked_rois:
             link_roi.translate(*args, **kargs, from_linked_roi=True)
         if "from_linked_roi" not in kargs:
@@ -651,17 +651,19 @@ class ROI(GraphicsObject):
         return True
 
     def getLocalHandlePositions(self, index=None):
-        """Returns the position of handles in the ROI's coordinate system.
+        """Returns the position of handles (in the ROI's coordinate system)
 
         The format returned is a list of (name, pos) tuples.
         """
         if index == None:
             positions = []
             for h in self.handles:
-                positions.append((h['name'], h['pos']))
+                # adding self.getState()['pos'] fixed the issue with the handles position
+                # to get them in the ROI's coordinate system, remove self.getState()['pos']
+                positions.append((h['name'], h['pos'] + self.getState()['pos']))
             return positions
         else:
-            return (self.handles[index]['name'], self.handles[index]['pos'])
+            return (self.handles[index]['name'], self.handles[index]['pos'] + self.getState()['pos'])
 
     def getSceneHandlePositions(self, index=None):
         """Returns the position of handles in the scene coordinate system.
@@ -805,6 +807,7 @@ class ROI(GraphicsObject):
             newPos = self.mapToParent(ev.pos()) + self.cursorOffset
             self.translate(newPos - self.pos(), snap=snap, finish=False)
 
+
     def mouseClickEvent(self, ev):
         if ev.button() == QtCore.Qt.RightButton and self.isMoving:
             for link_roi in self.linked_rois:
@@ -839,7 +842,9 @@ class ROI(GraphicsObject):
         """
         return True
 
-    def movePoint(self, handle, pos, modifiers=QtCore.Qt.KeyboardModifier(), finish=True, coords='parent'):
+    def movePoint(self, handle, pos, modifiers=QtCore.Qt.KeyboardModifier(),
+                  finish=True, coords='parent'):
+        # called_by_self_roi: if True means it has not been called by the handle
         ## called by Handles when they are moved.
         ## pos is the new position of the handle in scene coords, as requested by the handle.
 
@@ -1054,8 +1059,8 @@ class ROI(GraphicsObject):
                     p = h['pos']
                     h['item'].setPos(h['pos'] * self.state['size'])
                 # else:
-                #    trans = self.state['pos']-self.lastState['pos']
-                #    h['item'].setPos(h['pos'] + h['item'].parentItem().mapFromParent(trans))
+                #     trans = self.state['pos']-self.lastState['pos']
+                #     h['item'].setPos(h['pos'] + h['item'].parentItem().mapFromParent(trans))
 
             self.update()
             self.sigRegionChanged.emit(self)
@@ -1510,7 +1515,6 @@ class Handle(UIGraphicsItem):
             self.isMoving = True
             self.startPos = self.scenePos()
             self.cursorOffset = self.scenePos() - ev.buttonDownScenePos()
-            # print(f"mouseDragEvent {self.scenePos()} {from_link}")
 
         if self.isMoving:  ## note: isMoving may become False in mid-drag due to right-click.
             pos = ev.scenePos() + self.cursorOffset
@@ -1521,7 +1525,7 @@ class Handle(UIGraphicsItem):
         for linked_handle in self.linked_handles:
             linked_handle.mouseDragEvent(ev=ev, from_link=True)
 
-    def movePoint(self, pos, modifiers=QtCore.Qt.KeyboardModifier(), finish=True):
+    def movePoint(self, pos, modifiers=QtCore.Qt.KeyboardModifier(), called_by_parent_roi=False, finish=True):
         for r in self.rois:
             if not r.checkPointMove(self, pos, modifiers):
                 return
