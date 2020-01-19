@@ -18,6 +18,7 @@ import os
 from sortedcontainers import SortedDict
 from l_d_rois import PolyLineROI
 import pickle
+from shapely.geometry import Polygon, MultiPoint
 
 # TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
 
@@ -202,6 +203,10 @@ class RoisManager:
         # indicated that is pre_computed_data is available, if it has been used yet
         self.pre_computed_data_not_loaded_yet = True
 
+        # represent the last roi for which the mouse went over
+        # tuple of 3 elemens (pg_roi, roi_id, layer_index)
+        self.last_roi_with_mouse_over = None
+
     def is_pre_computed_data_available(self):
         """
         Return True if some saved_data (in a file) are available
@@ -301,6 +306,128 @@ class RoisManager:
             return []
         return self.rois_by_layer_dict[layer_index][cells_display_key]
 
+    def hover_event_on_roi(self, pg_roi):
+        """
+        Call when the mouse get hover a pg_roi
+        :param pg_roi:
+        :return:
+        """
+        roi_id = pg_roi.roi_id
+        layer_index = pg_roi.layer_index
+        self.last_roi_with_mouse_over = (pg_roi, roi_id, layer_index)
+        # to know if the hover is still on: pg_roi.mouseHovering == True ?
+
+    def _get_pg_rois_hovering(self):
+        """
+        Return a pg_roi if the mouse is hover one, None otherwise
+        :return:
+        """
+        if self.last_roi_with_mouse_over is None:
+            return None
+
+        if not self.last_roi_with_mouse_over[0].mouseHovering:
+            self.last_roi_with_mouse_over = None
+            return None
+
+        return self.last_roi_with_mouse_over[0]
+
+    def dilate_hover_roi(self):
+        """
+        Dilate the hover roi of x pixels
+        :return:
+        """
+
+        pg_roi = self._get_pg_rois_hovering()
+
+        if pg_roi is None:
+            return
+
+        layer_index = pg_roi.layer_index
+        roi_id = pg_roi.roi_id
+        cell_id = pg_roi.cell_id
+
+        # getting contours first
+        handle_name_positions = pg_roi.getLocalHandlePositions()
+        contours = [handle_name_pos[1] for handle_name_pos in handle_name_positions]
+
+        # then create shapely polygon
+        polygon = Polygon(contours)
+
+        # then dilate it
+        dilated_poly = polygon.buffer(0.5)
+        dilated_poly = dilated_poly.simplify(0.1, preserve_topology=False)
+        # then getting its contours
+        coords = np.array(dilated_poly.exterior.coords)
+        # print(f"coords {coords}")
+        # print(f"coords shape {coords.shape}")
+        # raise Exception("Dilatation over")
+
+        # then create a new roi
+        self.add_pg_roi(contours=coords, layer=layer_index, force_cell_id=cell_id)
+
+        # then delete the original roi
+        self.remove_roi(roi_id=roi_id, layer_index=layer_index)
+
+    def erode_hover_roi(self):
+        """
+        Erode the hover roi of x pixels
+        :return:
+        """
+
+        pg_roi = self._get_pg_rois_hovering()
+
+        if pg_roi is None:
+            return
+
+        layer_index = pg_roi.layer_index
+        roi_id = pg_roi.roi_id
+        cell_id = pg_roi.cell_id
+
+        # getting contours first
+        handle_name_positions = pg_roi.getLocalHandlePositions()
+        contours = [handle_name_pos[1] for handle_name_pos in handle_name_positions]
+
+        # then create shapely polygon
+        polygon = Polygon(contours)
+
+        # then dilate it
+        dilated_poly = polygon.buffer(-0.5)
+        dilated_poly = dilated_poly.simplify(0.1, preserve_topology=False)
+        # then getting its contours
+        coords = np.array(dilated_poly.exterior.coords)
+
+        # then create a new roi
+        self.add_pg_roi(contours=coords, layer=layer_index, force_cell_id=cell_id)
+
+        # then delete the original roi
+        self.remove_roi(roi_id=roi_id, layer_index=layer_index)
+
+    def copy_hover_roi(self):
+        """
+        Copy the hover roi
+        :return:
+        """
+        pg_roi = self._get_pg_rois_hovering()
+
+        if pg_roi is None:
+            # then we cancelled the last copied_roi
+            self.copied_roi = None
+            return
+
+        self.copy_roi(pg_roi=pg_roi)
+
+    def remove_hover_roi(self):
+        """
+        Remove the hover roi
+        :return:
+        """
+        pg_roi = self._get_pg_rois_hovering()
+
+        if pg_roi is None:
+            return
+
+        self.remove_roi(roi_id=pg_roi.roi_id, layer_index=pg_roi.layer_index)
+
     def remove_roi(self, roi_id, layer_index):
         """
 
@@ -311,6 +438,9 @@ class RoisManager:
         Returns:
 
         """
+        if roi_id not in self.pg_rois_dict:
+            return
+
         del self.pg_rois_dict[roi_id]
 
         for cells_diplay_key, rois_list in self.rois_by_layer_dict[layer_index].items():
@@ -748,9 +878,9 @@ class MainWindow(QMainWindow):
         #         self.central_widget.start()
         # if event.key() == QtCore.Qt.Key_C:
         #     self.central_widget.set_current_timestep_to_actual_range()
-        if event.key() == QtCore.Qt.Key_Plus or event.key() == QtCore.Qt.Key_Up:
+        if event.key() == QtCore.Qt.Key_Up:
             self.central_widget.change_layer(increment=True)
-        if event.key() == QtCore.Qt.Key_Minus or event.key() == QtCore.Qt.Key_Down:
+        if event.key() == QtCore.Qt.Key_Down:
             self.central_widget.change_layer(increment=False)
         if event.key() == QtCore.Qt.Key_D:
             # display selected combo_boxes
@@ -1989,10 +2119,18 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
         Returns:
 
         """
-        if event.key() == QtCore.Qt.Key_R:
+        if event.key() == QtCore.Qt.Key_N:
             self.create_new_roi_in_the_middle()
         if (event.modifiers() & Qt.ControlModifier) and (event.key() == QtCore.Qt.Key_V):
             self.roi_manager.paste_roi(layer=self.current_layer)
+        if (event.modifiers() & Qt.ControlModifier) and (event.key() == QtCore.Qt.Key_C):
+            self.roi_manager.copy_hover_roi()
+        if (event.modifiers() & Qt.ControlModifier) and (event.key() == QtCore.Qt.Key_R):
+            self.roi_manager.remove_hover_roi()
+        if event.key() == QtCore.Qt.Key_Plus:
+            self.roi_manager.dilate_hover_roi()
+        if event.key() == QtCore.Qt.Key_Minus:
+            self.roi_manager.erode_hover_roi()
         # Sending the event to the main window if the widget is in the main window
         if self.main_window is not None:
             self.main_window.keyPressEvent(event=event)

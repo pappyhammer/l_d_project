@@ -716,6 +716,7 @@ class ROI(GraphicsObject):
                 QtCore.Qt.LeftButton)  ## If the ROI is hilighted, we should accept all clicks to avoid confusion.
             ev.acceptClicks(QtCore.Qt.RightButton)
             ev.acceptClicks(QtCore.Qt.MidButton)
+            self.roi_manager.hover_event_on_roi(pg_roi=self)
         else:
             self.setMouseHover(False)
 
