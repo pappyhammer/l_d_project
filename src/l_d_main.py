@@ -346,6 +346,10 @@ class RoisManager:
         roi_id = pg_roi.roi_id
         cell_id = pg_roi.cell_id
 
+        if roi_id not in self.pg_rois_dict:
+            # meaning the roi doesn't exists anymore
+            return
+
         # getting contours first
         handle_name_positions = pg_roi.getLocalHandlePositions()
         contours = [handle_name_pos[1] for handle_name_pos in handle_name_positions]
@@ -382,6 +386,10 @@ class RoisManager:
         layer_index = pg_roi.layer_index
         roi_id = pg_roi.roi_id
         cell_id = pg_roi.cell_id
+
+        if roi_id not in self.pg_rois_dict:
+            # meaning the roi doesn't exists anymore
+            return
 
         # getting contours first
         handle_name_positions = pg_roi.getLocalHandlePositions()
