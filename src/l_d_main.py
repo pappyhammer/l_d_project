@@ -142,6 +142,14 @@ class MyQPushButton(QPushButton):
             self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id%len(self.cells_color)]}; color:white;")
         self.activated = not self.activated
 
+    def indirect_button_action(self):
+        """
+        Means the user hasn't clicked on the button directly
+        Returns:
+
+        """
+        self._button_action()
+
     def _button_action(self):
         self.change_activation_status()
         self.roi_manager.button_action(cell_id=self.cell_id)
@@ -503,11 +511,14 @@ class RoisManager:
 
     def pg_roi_clicked(self, pg_roi):
         """
-        Called when a ROI has been clicked on
+        Called when a ROI has been clicked on. Will change the roi cell_id if a button of the cell has been clicked
+        otherwise if no button is clicked, the cell of the ROI is now active (the button is activated)
         :param pg_roi:
         :return:
         """
         if self.active_cell_id is None:
+            button = self.cells_buttons_dict[pg_roi.cell_id]
+            button.indirect_button_action()
             return
         if self.active_cell_id == pg_roi.cell_id:
             return
