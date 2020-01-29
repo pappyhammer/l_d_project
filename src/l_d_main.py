@@ -890,6 +890,9 @@ class MainWindow(QMainWindow):
             self.central_widget.change_layer(increment=True)
         if event.key() == QtCore.Qt.Key_Down:
             self.central_widget.change_layer(increment=False)
+        for layer_index in range(self.central_widget.n_layers):
+            if event.key() == getattr(QtCore.Qt, f"Key_{layer_index}"):
+                self.central_widget.change_layer(layer_index=layer_index)
         if event.key() == QtCore.Qt.Key_D:
             # display selected combo_boxes
             self.central_widget.display_selected_field()
@@ -1726,24 +1729,31 @@ class CentralWidget(QWidget):
 
         roi_manager.add_pg_roi(contours=contours, layer=self.current_layer)
 
-    def change_layer(self, increment):
+    def change_layer(self, increment=None, layer_index=None):
         """
-                increment or decrement layer
+                increment or decrement layer, or choose directly which layer to display
                 Args:
-                    increment: bool
+                    increment: bool or None to choose the layer index directly
+                    layer_index: int or None to decrement or increment layer
 
                 Returns:
 
         """
-        if increment:
-            if self.current_layer + 1 > 6:
+        if increment is not None:
+            if increment:
+                if self.current_layer + 1 > (self.n_layers - 1):
+                    return
+                self.current_layer += 1
+                self.layer_spin_box.setValue(self.current_layer)
+            else:
+                if self.current_layer - 1 < 0:
+                    return
+                self.current_layer -= 1
+                self.layer_spin_box.setValue(self.current_layer)
+        elif layer_index is not None:
+            if layer_index < 0 or layer_index >= self.n_layers:
                 return
-            self.current_layer += 1
-            self.layer_spin_box.setValue(self.current_layer)
-        else:
-            if self.current_layer - 1 < 0:
-                return
-            self.current_layer -= 1
+            self.current_layer = layer_index
             self.layer_spin_box.setValue(self.current_layer)
 
     def _get_rois_manager(self, image_keys):
@@ -2292,8 +2302,7 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     with open(pickle_file_name, 'rb') as f:
         loaded_data_dict = pickle.load(f)
 
-    n_layers = 7
-
+    # n_layers = 7
 
     images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
                                  mask_dir_path=mask_dir_path)
@@ -2302,10 +2311,11 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     # removing the two last keys which are like "mask", "red" and the tiffs file_name
     all_image_keys = set([tuple(images[:-2]) for images in all_image_keys])
 
+    print(f"N images {len(loaded_data_dict)}")
     for image_keys, pre_computed_data in loaded_data_dict.items():
         images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
         cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
-
+        print(f"{image_keys}:")
         for cell_id, layer_dict in pre_computed_data.items():
             sum_areas = 0
             sum_pixels_intensity = 0
@@ -2422,8 +2432,7 @@ if __name__ == "__main__":
 
     result_path = os.path.join(root_path, "results_ld")
 
-    pickle_file_name = os.path.join(result_path, "rosie_rois.pkl")
-
+    pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
 
     main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
     # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path)
