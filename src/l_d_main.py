@@ -989,6 +989,7 @@ class MyQComboBox(QComboBox):
 
             # first we make sure this choice_id exists in the tree
             if not check_if_list_of_keys_exists(list_keys=list_keys, my_dict=self.root_choices):
+                print(f"Don't exist: {list_keys}")
                 continue
 
             # need to put 2 arguments, in order to be able to find it using findData
@@ -1249,7 +1250,7 @@ class ComboBoxWidget(MyQFrame):
             if (ending_keys is not None) and (choice_id in ending_keys):
                 continue
             if combo_box is None:
-                combo_box = MyQComboBox(root_choices = self.original_choices, status_color_fct=self.status_color_fct)
+                combo_box = MyQComboBox(root_choices=self.original_choices, status_color_fct=self.status_color_fct)
                 self.combo_boxes.append(combo_box)
             combo_box.addItem(get_icon_from_color("red"), str(choice_id))
 
@@ -1418,6 +1419,9 @@ class CentralWidget(QWidget):
                                           mask_dir_path=mask_dir_path)
 
         self.all_image_keys = get_tree_dict_as_a_list(self.images_dict)
+        # print(f"self.all_image_keys")
+        # for image_keys in self.all_image_keys:
+        #     print(f"{image_keys}")
 
         # removing the two last keys which are like "mask", "red" and the tiffs file_name
         self.all_image_keys = set([tuple(images[:-2]) for images in self.all_image_keys])
@@ -1646,16 +1650,44 @@ class CentralWidget(QWidget):
 
         file_name = file_dialog.selectedFiles()[0]
         with open(file_name, 'rb') as f:
-            self.loaded_data_dict = pickle.load(f)
-            self._update_data_from_loaded_one()
-            # TODO: update ROIs and colors of combo_boxes
+            pickle_data = pickle.load(f)
+            print(f"N images in pickle file: {len(pickle_data)}")
+            list_to_display = []
+            for key, value in pickle_data.items():
+                list_to_display.append(key)
+                # print(f"{key}")
+            list_to_display.sort()
+            for item in list_to_display:
+                print(item)
+            print("")
+            print(f"N images already loaded: {len(self.loaded_data_dict)}")
+            list_to_display = []
+            for key, value in self.loaded_data_dict.items():
+                list_to_display.append(key)
+            list_to_display.sort()
+            for item in list_to_display:
+                print(item)
+            size_loaded_dict_before_update = len(self.loaded_data_dict)
+            print("")
+            self.loaded_data_dict.update(pickle_data)
 
-    def _update_data_from_loaded_one(self):
+            if size_loaded_dict_before_update > 0:
+                print(f"N images now loaded: {len(self.loaded_data_dict)}")
+                list_to_display = []
+                for key, value in self.loaded_data_dict.items():
+                    list_to_display.append(key)
+                list_to_display.sort()
+                for item in list_to_display:
+                    print(item)
+                print("")
+            self._update_data_from_loaded_one(data_loaded_dict=pickle_data)
+
+    def _update_data_from_loaded_one(self, data_loaded_dict):
         """
         Use information in self.loaded_data_dict to update the display or ROIs and combo_boxes
         :return:
         """
-        for image_keys, data_dict in self.loaded_data_dict.items():
+        for image_keys, data_dict in data_loaded_dict.items():
             if image_keys in self.rois_manager_dict:
                 # updating roi_manager (will update the buttons and the images display)
                 roi_manager = self.rois_manager_dict[image_keys]
@@ -1713,6 +1745,15 @@ class CentralWidget(QWidget):
         # print(f"layer_value_changed {value}")
 
     def add_pg_roi(self, pos, image_keys):
+        """
+        Create a new ROI, and either a new cell associated to it if no cell is selected.
+        Args:
+            pos:
+            image_keys:
+
+        Returns:
+
+        """
         roi_manager = self.rois_manager_dict[tuple(image_keys)]
         size_half_square = 5
         # create a new ROI with a square shape
@@ -1796,7 +1837,6 @@ class CentralWidget(QWidget):
         roi_manager.update_colors()
         self.combo_box.update_combo_boxes_status()
         self.update_cells_buttons_layout()
-
 
 class MyViewBox(pg.ViewBox):
     """
@@ -2443,7 +2483,8 @@ if __name__ == "__main__":
 
     result_path = os.path.join(root_path, "results_ld")
 
-    pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
+    # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
+    pickle_file_name = os.path.join(root_path, "pkl_files", "test_bis_bis.pkl")
 
     main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
     # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path)
