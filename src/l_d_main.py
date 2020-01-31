@@ -19,6 +19,8 @@ from sortedcontainers import SortedDict
 from l_d_rois import PolyLineROI
 import pickle
 from shapely.geometry import Polygon, MultiPoint
+import pandas as pd
+from datetime import datetime
 
 # TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
 
@@ -2345,7 +2347,7 @@ class PlanMask:
         plt.close()
 
 
-def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path):
+def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path):
     """
     Analyse the data that has been saved using the GUI
     :return:
@@ -2354,7 +2356,10 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
         loaded_data_dict = pickle.load(f)
 
     # n_layers = 7
-
+    # the key is a tuple representing the image
+    # value is a dict with key is an int representing the cell
+    # than value is a dict with each key the field description and value the corresponding value
+    data_dict = SortedDict()
     images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
                                  mask_dir_path=mask_dir_path)
 
@@ -2366,10 +2371,16 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     for image_keys, pre_computed_data in loaded_data_dict.items():
         images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
         cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
+        data_dict[image_keys] = SortedDict()
         print(f"{image_keys}:")
         for cell_id, layer_dict in pre_computed_data.items():
+            data_dict[image_keys][cell_id] = dict()
+            cell_dict = data_dict[image_keys][cell_id]
             sum_areas = 0
             sum_pixels_intensity = 0
+            sum_pixels_intensity_z_score = 0
+            sum_median_pixels_intensity = 0
+            sum_median_pixels_intensity_z_score = 0
             for layer, all_contours in layer_dict.items():
                 for contours in all_contours:
                     cfos_image = cfos_images[layer]
@@ -2394,13 +2405,75 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
                     sum_areas += area
 
                     # normalizing cfos image, z_score
-                    cfos_image = cfos_image - np.mean(cfos_image)
-                    cfos_image = cfos_image / np.std(cfos_image)
+                    cfos_image_original = cfos_image.copy()
+                    cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
 
-                    pixels_intensity = np.sum(cfos_image[mask_image])
+                    pixels_intensity = np.sum(cfos_image_z_score[mask_image])
+                    sum_pixels_intensity_z_score += pixels_intensity
+
+                    pixels_intensity = np.sum(cfos_image_original[mask_image])
                     sum_pixels_intensity += pixels_intensity
-            print(f"Cell {cell_id}: area {sum_areas}, pixels {np.round(sum_pixels_intensity, 2)}, "
-                  f"pixels norm {np.round(sum_pixels_intensity / sum_areas, 2)}")
+
+                    sum_median_pixels_intensity += np.median(cfos_image_original[mask_image])
+
+                    sum_median_pixels_intensity_z_score += np.median(cfos_image_z_score[mask_image])
+
+            cell_dict["sum_areas"] = sum_areas
+            cell_dict["n_layers"] = len(layer_dict)
+            cell_dict["sum_pixels_intensity_z_score"] = sum_pixels_intensity_z_score
+            cell_dict["sum_pixels_intensity"] = sum_pixels_intensity
+            cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
+            cell_dict["sum_median_pixels_intensity"] = sum_median_pixels_intensity
+            cell_dict["sum_median_pixels_intensity_z_score"] = sum_median_pixels_intensity_z_score
+
+    save_results_in_xls_file(result_path, data_dict)
+
+
+def save_results_in_xls_file(result_path, data_dict):
+    """
+
+    Args:
+        result_path:
+        data_dict: the key is a tuple representing the image, value is a dict with key is an int representing the cell
+         than value is a dict with each key the field description and value the corresponding value
+
+    Returns:
+
+    """
+    image_keys_names = ["group", "letter", "dors_ventr", "s", "position"]
+
+    # just to get column names
+    fields_names = []
+    for image_keys, cell_dict in data_dict.items():
+        for fields_dict in cell_dict.values():
+            fields_names = list(fields_dict.keys())
+            break
+        break
+
+    time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
+
+    writer = pd.ExcelWriter(f'{result_path}/rosie_data_{time_str}.xlsx')
+    column_names = []
+    column_names.extend(image_keys_names)
+    column_names.append("cell")
+    column_names.extend(fields_names)
+
+    results_df = pd.DataFrame(columns=column_names)
+    line_index = 1
+    for image_keys, cell_dict in data_dict.items():
+        if len(cell_dict) == 0:
+            continue
+        for image_key_index, image_key in enumerate(image_keys):
+            results_df.at[line_index, image_keys_names[image_key_index]] = image_key
+
+        for cell, fields_dict in cell_dict.items():
+            results_df.at[line_index, "cell"] = cell
+            for field_key, field_value in fields_dict.items():
+                results_df.at[line_index, field_key] = field_value
+        line_index += 1
+
+    results_df.to_excel(writer, 'data', index=False)
+    writer.save()
 
 
 def load_mask(masks_path, mask_id):
@@ -2486,5 +2559,5 @@ if __name__ == "__main__":
     # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
     pickle_file_name = os.path.join(root_path, "pkl_files", "test_bis_bis.pkl")
 
-    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
-    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path)
+    # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
