@@ -2381,9 +2381,17 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             sum_pixels_intensity_z_score = 0
             sum_median_pixels_intensity = 0
             sum_median_pixels_intensity_z_score = 0
-            for layer, all_contours in layer_dict.items():
+            cfos_matrix = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
+            cfos_matrix_z_score = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
+
+            for layer, all_contours in enumerate(layer_dict.values()):
+                cfos_image = cfos_images[layer]
+                # normalizing cfos image, z_score
+                cfos_image_original = cfos_image.copy()
+                cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
+                cfos_matrix[layer] = cfos_image
+                cfos_matrix_z_score[layer] = cfos_image_z_score
                 for contours in all_contours:
-                    cfos_image = cfos_images[layer]
                     # building pixel mask from the contours
                     # converting contours as array and value as integers
                     contours_array = np.zeros((2, len(contours)), dtype="int16")
@@ -2396,17 +2404,13 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
                     check_pos_by_plotting = False
                     if check_pos_by_plotting:
                         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
-                        fig.canvas.set_window_title(f"cell {cell_id}, layer {layer}")
+                        fig.canvas.set_window_title(f"cell {cell_id}")
                         ax1.imshow(mask_image)
                         # plt.show()
                         ax2.imshow(cfos_image)
                         plt.show()
                     area = np.sum(mask_image)
                     sum_areas += area
-
-                    # normalizing cfos image, z_score
-                    cfos_image_original = cfos_image.copy()
-                    cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
 
                     pixels_intensity = np.sum(cfos_image_z_score[mask_image])
                     sum_pixels_intensity_z_score += pixels_intensity
@@ -2420,6 +2424,8 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
 
             cell_dict["sum_areas"] = sum_areas
             cell_dict["n_layers"] = len(layer_dict)
+            cell_dict["mean_cfos_image"] = np.mean(cfos_matrix)
+            cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_matrix_z_score)
             cell_dict["sum_pixels_intensity_z_score"] = sum_pixels_intensity_z_score
             cell_dict["sum_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
@@ -2557,7 +2563,7 @@ if __name__ == "__main__":
     result_path = os.path.join(root_path, "results_ld")
 
     # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
-    pickle_file_name = os.path.join(root_path, "pkl_files", "test_bis_bis.pkl")
+    pickle_file_name = os.path.join(root_path, "pkl_files", "test.pkl")
 
     # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
     analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
