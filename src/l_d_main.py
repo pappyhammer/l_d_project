@@ -2470,7 +2470,7 @@ def save_results_in_xls_file(result_path, data_dict):
             results_df.at[line_index, "cell"] = cell
             for field_key, field_value in fields_dict.items():
                 results_df.at[line_index, field_key] = field_value
-        line_index += 1
+            line_index += 1
 
     results_df.to_excel(writer, 'data', index=False)
     writer.save()
