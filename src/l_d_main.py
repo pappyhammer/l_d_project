@@ -2471,10 +2471,10 @@ def save_results_in_xls_file(result_path, data_dict):
     for image_keys, cell_dict in data_dict.items():
         if len(cell_dict) == 0:
             continue
-        for image_key_index, image_key in enumerate(image_keys):
-            results_df.at[line_index, image_keys_names[image_key_index]] = image_key
-
+        
         for cell, fields_dict in cell_dict.items():
+            for image_key_index, image_key in enumerate(image_keys):
+                results_df.at[line_index, image_keys_names[image_key_index]] = image_key
             results_df.at[line_index, "cell"] = cell
             for field_key, field_value in fields_dict.items():
                 results_df.at[line_index, field_key] = field_value
