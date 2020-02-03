@@ -2381,16 +2381,16 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             sum_pixels_intensity_z_score = 0
             sum_median_pixels_intensity = 0
             sum_median_pixels_intensity_z_score = 0
-            cfos_matrix = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
-            cfos_matrix_z_score = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
+            # cfos_matrix = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
+            # cfos_matrix_z_score = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
 
             for layer, all_contours in enumerate(layer_dict.values()):
                 cfos_image = cfos_images[layer]
                 # normalizing cfos image, z_score
                 cfos_image_original = cfos_image.copy()
                 cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
-                cfos_matrix[layer] = cfos_image
-                cfos_matrix_z_score[layer] = cfos_image_z_score
+                # cfos_matrix[layer] = cfos_image
+                # cfos_matrix_z_score[layer] = cfos_image_z_score
                 for contours in all_contours:
                     # building pixel mask from the contours
                     # converting contours as array and value as integers
@@ -2424,8 +2424,10 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
 
             cell_dict["sum_areas"] = sum_areas
             cell_dict["n_layers"] = len(layer_dict)
-            cell_dict["mean_cfos_image"] = np.mean(cfos_matrix)
-            cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_matrix_z_score)
+            cell_dict["mean_cfos_image"] = np.mean(cfos_images)
+            cfos_imges_z_score = (cfos_images-np.mean(cfos_images))
+            cfos_imges_z_score = cfos_imges_z_score / np.std(cfos_imges_z_score)
+            cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_imges_z_score)
             cell_dict["sum_pixels_intensity_z_score"] = sum_pixels_intensity_z_score
             cell_dict["sum_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
