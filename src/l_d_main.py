@@ -2366,13 +2366,16 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     all_image_keys = get_tree_dict_as_a_list(images_dict)
     # removing the two last keys which are like "mask", "red" and the tiffs file_name
     all_image_keys = set([tuple(images[:-2]) for images in all_image_keys])
-
+    novel_95p_c_fos_list = []
     print(f"N images {len(loaded_data_dict)}")
     for image_keys, pre_computed_data in loaded_data_dict.items():
         images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
         cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
         data_dict[image_keys] = SortedDict()
         print(f"{image_keys}:")
+        # novel condition
+        if image_keys[1].lower().strip().startswith("n"):
+            novel_95p_c_fos_list.append(np.percentile(cfos_images, 95))
         for cell_id, layer_dict in pre_computed_data.items():
             data_dict[image_keys][cell_id] = dict()
             cell_dict = data_dict[image_keys][cell_id]
@@ -2429,13 +2432,14 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             cfos_imges_z_score = cfos_imges_z_score / np.std(cfos_imges_z_score)
             cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_imges_z_score)
 
-            cell_dict["95_p_cfos_image"] = np.mean([np.percentile(img, 95) for img in cfos_images])
+            # cell_dict["95_p_cfos_image"] = np.mean([np.percentile(img, 95) for img in cfos_images])
+            cell_dict["95_p_cfos_image"] = np.percentile(cfos_images, 95)
             cell_dict["sum_pixels_intensity_z_score"] = sum_pixels_intensity_z_score
             cell_dict["sum_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_median_pixels_intensity
             cell_dict["sum_median_pixels_intensity_z_score"] = sum_median_pixels_intensity_z_score
-
+    data_dict[("summary", )] = {"95_p_cfos_novel_image": np.mean(novel_95p_c_fos_list)}
     save_results_in_xls_file(result_path, data_dict)
 
 
@@ -2455,10 +2459,14 @@ def save_results_in_xls_file(result_path, data_dict):
     # just to get column names
     fields_names = []
     for image_keys, cell_dict in data_dict.items():
+        if image_keys == ("summary", ):
+            continue
         for fields_dict in cell_dict.values():
-            fields_names = list(fields_dict.keys())
+            fields_names.extend(list(fields_dict.keys()))
             break
         break
+    fields_names.extend(list(data_dict[("summary", )].keys()))
+
 
     time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
 
@@ -2471,6 +2479,12 @@ def save_results_in_xls_file(result_path, data_dict):
     results_df = pd.DataFrame(columns=column_names)
     line_index = 1
     for image_keys, cell_dict in data_dict.items():
+        if image_keys == ("summary", ):
+            results_df.at[line_index, "group"] = "Summary"
+            for key_summary, value_summary in cell_dict.items():
+                results_df.at[line_index, key_summary] = value_summary
+            line_index += 1
+            continue
         if len(cell_dict) == 0:
             continue
 
