@@ -2428,6 +2428,8 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             cfos_imges_z_score = (cfos_images-np.mean(cfos_images))
             cfos_imges_z_score = cfos_imges_z_score / np.std(cfos_imges_z_score)
             cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_imges_z_score)
+
+            cell_dict["95_p_cfos_image"] = np.mean([np.percentile(img, 95) for img in cfos_images])
             cell_dict["sum_pixels_intensity_z_score"] = sum_pixels_intensity_z_score
             cell_dict["sum_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
@@ -2471,7 +2473,7 @@ def save_results_in_xls_file(result_path, data_dict):
     for image_keys, cell_dict in data_dict.items():
         if len(cell_dict) == 0:
             continue
-        
+
         for cell, fields_dict in cell_dict.items():
             for image_key_index, image_key in enumerate(image_keys):
                 results_df.at[line_index, image_keys_names[image_key_index]] = image_key
