@@ -22,6 +22,7 @@ from shapely.geometry import Polygon, MultiPoint
 import pandas as pd
 from datetime import datetime
 
+
 # TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
 
 BREWER_COLORS = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f',
@@ -2260,8 +2261,8 @@ def get_contours_from_mask_img(mask_img):
             # removing one pixel cells
             continue
 
-        coord_contours.append(xy)
 
+        coord_contours.append(xy)
         # centroid
         m = cv2.moments(contour)
         cx = int(m['m10'] / m['m00'])
@@ -2407,7 +2408,7 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
                     check_pos_by_plotting = False
                     if check_pos_by_plotting:
                         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
-                        fig.canvas.set_window_title(f"cell {cell_id}")
+                        fig.canvas.set_window_title(f"Slice: {image_keys} Cell ID:{cell_id} Z-level:{layer}")
                         ax1.imshow(mask_image)
                         # plt.show()
                         ax2.imshow(cfos_image)
@@ -2563,6 +2564,138 @@ def main_gui(mask_dir_path, red_dir_path, cfos_dir_path):
     sys.exit(app.exec_())
 
 
+def plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
+                         input_pickle_file_name):
+        """
+        Analyse the data that has been saved using the GUI
+        :return:
+        """
+
+        # def press_fig_img(event):
+        #     print(f"press {event.key}")
+
+        with open(pickle_file_name, 'rb') as f:
+            loaded_data_dict = pickle.load(f)
+
+        if os.path.isfile(input_pickle_file_name):
+            with open(input_pickle_file_name, 'rb') as f:
+               inputs_dict = pickle.load(f)
+        else:
+            inputs_dict = dict()
+        try:
+            # n_layers = 7
+            # the key is a tuple representing the image
+            # value is a dict with key is an int representing the cell
+            # than value is a dict with each key the field description and value the corresponding value
+            data_dict = SortedDict()
+            images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
+                                         mask_dir_path=mask_dir_path)
+
+            all_image_keys = get_tree_dict_as_a_list(images_dict)
+            # removing the two last keys which are like "mask", "red" and the tiffs file_name
+            all_image_keys = set([tuple(images[:-2]) for images in all_image_keys])
+
+            # print(f"N images {len(loaded_data_dict)}")
+            for image_keys, pre_computed_data in loaded_data_dict.items():
+                if image_keys in inputs_dict:
+                    continue
+                else:
+                    inputs_dict[image_keys] = dict()
+                images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
+                cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
+                red_images = get_image_from_tiff(file_name=images_data_dict["red"])
+                data_dict[image_keys] = SortedDict()
+                print(f"{image_keys}:")
+
+                for cell_id, layer_dict in pre_computed_data.items():
+
+                    data_dict[image_keys][cell_id] = dict()
+                    cell_dict = data_dict[image_keys][cell_id]
+
+                    layer_sum=len(layer_dict)
+                    print(f"layer_dict {list(layer_dict.keys())}")
+                    cfos_layers=np.empty((layer_sum,cfos_images.shape[1],cfos_images.shape[2]))
+                    cfos_layers[:] = np.nan
+
+                    for layer, all_contours in layer_dict.items():
+                        print(f"layer {layer}")
+                        cfos_layers[layer-1, :, :] = cfos_images[layer-1]
+                        print(f"cfos_layers {cfos_layers}")
+                    cfos_image=cfos_layers.sum(axis=0)
+
+                    # print(f"{image_keys} Cell ID:{cell_id} layers:{cfos_layers.shape}")
+                    # print(f"{image_keys} Cell ID:{cell_id} layers:{cfos_layers[:,0,0]}")
+
+                    middle_cont=int(np.round(np.mean(list(layer_dict.keys()))))
+
+                    print(f"middle contour: {middle_cont}")
+                    contours = layer_dict[middle_cont]
+
+                    cell_polygon = patches.Polygon(xy=contours[0],
+                                                   fill=False, linewidth=1,
+                                                   facecolor=None,
+                                                   edgecolor="yellow",
+                                                   zorder=10)  # lw=2
+
+                    # for contours in all_contours:
+                    #     # building pixel mask from the contours
+                    #     # converting contours as array and value as integers
+                    #     contours_array = np.zeros((2, len(contours)), dtype="int16")
+                    #     for contour_index, coord in enumerate(contours):
+                    #         contours_array[0, contour_index] = int(coord[0])
+                    #         contours_array[1, contour_index] = int(coord[1])
+                    #     mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
+                    #     # morphology.binary_fill_holes(input
+                    #     mask_image[contours_array[1, :], contours_array[0, :]] = True
+                    #     print(f"Slice: {image_keys} Cell ID:{cell_id} Z-level:{layer}")
+                    #     fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
+                    #     fig.canvas.set_window_title(f"Slice: {image_keys} Cell ID:{cell_id} Z-level:{layer}")
+                    #     ax1.imshow(mask_image)
+
+                    # m = cv2.moments(contours)
+                    # # centroid
+                    # cx = int(m['m10'] / m['m00'])
+                    # cy = int(m['m01'] / m['m00'])
+                    poly_gon = MultiPoint(contours[0])
+                    cx, cy = poly_gon.centroid.coords[0]
+
+                    padding = 25
+                    # [max(0, cx-padding): min(cfos_image.shape[0], cx+padding+1),
+                    #                            max(0, cy-padding): min(cfos_image.shape[1], cy+padding+1)]
+                    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
+                    fig.canvas.set_window_title(f"{image_keys} Cell ID:{cell_id} layers:{layer_sum}")
+                    # fig.canvas.mpl_connect("key_press_event", press_fig_img)
+                    ax1.imshow(cfos_image)
+                    ax1.add_patch(cell_polygon)
+                    ax2.imshow(red_images[middle_cont])
+                    ax1.set_xlim(max(0, cx-padding), min(cfos_image.shape[0], cx+padding+1))
+                    ax1.set_ylim(max(0, cy-padding), min(cfos_image.shape[1], cy+padding+1))
+
+                    plt.savefig(os.path.join(result_path, "images", f"{image_keys}_{cell_id}.png"))
+                    plt.show()
+                    plt.close()
+
+                    input_str = input("Tell me everything: ")
+                    while input_str not in ["y", "n", "m", "end"]:
+                        input_str = input("Tell me everything: ")
+                    if input_str == "end":
+                        save_input_in_pickle(input_pickle_file_name, inputs_dict)
+                        return
+                    inputs_dict[image_keys][cell_id] = input_str
+
+            save_input_in_pickle(input_pickle_file_name, inputs_dict)
+        except Exception:
+            print("Exception catched")
+            save_input_in_pickle(input_pickle_file_name, inputs_dict)
+
+
+
+def save_input_in_pickle(pickle_file, data_dict):
+        with open(pickle_file, 'wb') as f:
+            pickle.dump(data_dict, f, pickle.HIGHEST_PROTOCOL)
+        save_results_in_xls_file(result_path, data_dict)
+
+
 if __name__ == "__main__":
     # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
     # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
@@ -2574,14 +2707,15 @@ if __name__ == "__main__":
     if root_path is None:
         raise Exception("Root path is None")
 
-    mask_dir_path = os.path.join(root_path, "masques")
-    red_dir_path = os.path.join(root_path, "cellules (red)")
-    cfos_dir_path = os.path.join(root_path, "cfos (green)")
+    mask_dir_path = os.path.join(root_path, "Detection", "masques")
+    red_dir_path = os.path.join(root_path, "Detection", "cellules (red)")
+    cfos_dir_path = os.path.join(root_path, "Detection", "cfos (green)")
 
-    result_path = os.path.join(root_path, "results_ld")
+    result_path = os.path.join(root_path, "ANALYSIS", "results")
 
-    # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
-    pickle_file_name = os.path.join(root_path, "pkl_files", "test.pkl")
+    pickle_file_name = os.path.join(result_path, "FINAL.pkl")
+    input_pickle_file_name = os.path.join(result_path, "double_staining.pkl")
 
-    # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
-    analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
+    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
+    # plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path, input_pickle_file_name)
