@@ -21,6 +21,7 @@ import pickle
 from shapely.geometry import Polygon, MultiPoint
 import pandas as pd
 from datetime import datetime
+import scipy.stats
 
 # TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
 
@@ -135,14 +136,16 @@ class MyQPushButton(QPushButton):
         QPushButton.__init__(self, str(cell_id))
         self.setToolTip(f"Cell {cell_id}")
         self.clicked.connect(self._button_action)
-        self.setStyleSheet(f"background-color:{self.cells_color[cell_id%len(self.cells_color)]}; color:black;")
+        self.setStyleSheet(f"background-color:{self.cells_color[cell_id % len(self.cells_color)]}; color:black;")
         self.activated = False
 
     def change_activation_status(self):
         if self.activated:
-            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id%len(self.cells_color)]}; color:black;")
+            self.setStyleSheet(
+                f"background-color:{self.cells_color[self.cell_id % len(self.cells_color)]}; color:black;")
         else:
-            self.setStyleSheet(f"background-color:{self.cells_color[self.cell_id%len(self.cells_color)]}; color:white;")
+            self.setStyleSheet(
+                f"background-color:{self.cells_color[self.cell_id % len(self.cells_color)]}; color:white;")
         self.activated = not self.activated
 
     def indirect_button_action(self):
@@ -817,7 +820,7 @@ class RoisManager:
         #     self.cells_n_layers_layout.removeWidget(item.widget())
         #     item.widget().deleteLater()
 
-            # item.widget().close()
+        # item.widget().close()
 
     def update_buttons_layout(self):
         # removing previous selection if there was one
@@ -1002,6 +1005,7 @@ class MyQComboBox(QComboBox):
         # to make combo_box following the next ones will be updated according to the content at the index 0
         self.next_combo_box.setCurrentIndex(0)
         # self.update_combo_boxes_status()
+
 
 def check_if_list_of_keys_exists(list_keys, my_dict):
     """
@@ -1841,6 +1845,7 @@ class CentralWidget(QWidget):
         self.combo_box.update_combo_boxes_status()
         self.update_cells_buttons_layout()
 
+
 class MyViewBox(pg.ViewBox):
     """
     Mixed between RectMode and PanMode.
@@ -2376,7 +2381,6 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     group_d_novel_99p_c_fos_list = []
     group_e_novel_99p_c_fos_list = []
 
-
     print(f"N images {len(loaded_data_dict)}")
     for image_keys, pre_computed_data in loaded_data_dict.items():
         images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
@@ -2409,11 +2413,20 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             # cfos_matrix = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
             # cfos_matrix_z_score = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
 
+            # value between 0 and 1 representing the position of the cell in intensity comparing to surrogates
+            percentile_value = get_cell_percentile_over_surrogates(cell_id=cell_id,
+                                                                   layer_dict=layer_dict,
+                                                                   cfos_images=cfos_images,
+                                                                   n_surrogates=1000,
+                                                                   image_keys=image_keys,
+                                                                   plot_distribution=True,
+                                                                   result_path=result_path)
             for layer, all_contours in enumerate(layer_dict.values()):
                 cfos_image = cfos_images[layer]
                 # normalizing cfos image, z_score
                 cfos_image_original = cfos_image.copy()
-                cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
+                if np.std(cfos_image) > 0:
+                    cfos_image_z_score = (cfos_image - np.mean(cfos_image)) / np.std(cfos_image)
                 # cfos_matrix[layer] = cfos_image
                 # cfos_matrix_z_score[layer] = cfos_image_z_score
                 for contours in all_contours:
@@ -2460,10 +2473,12 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
 
             cell_dict["sum_areas"] = sum_areas
             cell_dict["n_layers"] = len(layer_dict)
+            cell_dict["surrogate"] = percentile_value
             cell_dict["mean_cfos_image"] = np.mean(cfos_images)
             cell_dict["median_cfos_image"] = np.median(cfos_images)
-            cfos_imges_z_score = (cfos_images-np.mean(cfos_images))
-            cfos_imges_z_score = cfos_imges_z_score / np.std(cfos_imges_z_score)
+            cfos_imges_z_score = (cfos_images - np.mean(cfos_images))
+            if np.std(cfos_imges_z_score) > 0:
+                cfos_imges_z_score = cfos_imges_z_score / np.std(cfos_imges_z_score)
             cell_dict["mean_cfos_image_z_score"] = np.mean(cfos_imges_z_score)
 
             # cell_dict["95_p_cfos_image"] = np.mean([np.percentile(img, 95) for img in cfos_images])
@@ -2474,14 +2489,14 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             cell_dict["sum_median_pixels_intensity"] = sum_pixels_intensity
             cell_dict["sum_median_pixels_intensity"] = sum_median_pixels_intensity
             cell_dict["sum_median_pixels_intensity_z_score"] = sum_median_pixels_intensity_z_score
-            #cell_dict["legend for summaries"] = ['A', 'B', 'C', 'D', 'E']
+            # cell_dict["legend for summaries"] = ['A', 'B', 'C', 'D', 'E']
     summaries = [np.mean(group_a_novel_99p_c_fos_list),
-                              np.mean(group_b_novel_99p_c_fos_list),
-                              np.mean(group_c_novel_99p_c_fos_list),
-                              np.mean(group_d_novel_99p_c_fos_list),
-                              np.mean(group_e_novel_99p_c_fos_list),
-                             ]
-    data_dict[("summary", )] = {"95_p_cfos_novel_image": (str(np.mean(novel_95p_c_fos_list)) + '\n' + str(summaries))}
+                 np.mean(group_b_novel_99p_c_fos_list),
+                 np.mean(group_c_novel_99p_c_fos_list),
+                 np.mean(group_d_novel_99p_c_fos_list),
+                 np.mean(group_e_novel_99p_c_fos_list),
+                 ]
+    data_dict[("summary",)] = {"95_p_cfos_novel_image": (str(np.mean(novel_95p_c_fos_list)) + '\n' + str(summaries))}
 
     '''data_dict[("summaryA 99_p_cfos_novel_image",)] = {"95_p_cfos_novel_image": np.mean(group_a_novel_99p_c_fos_list)}
     data_dict[("summaryB 99_p_cfos_novel_image",)] = {"95_p_cfos_novel_image": np.mean(group_b_novel_99p_c_fos_list)}
@@ -2491,6 +2506,214 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     '''
     save_results_in_xls_file(result_path, data_dict)
 
+
+def get_cell_percentile_over_surrogates(cell_id,
+                                        layer_dict,
+                                        cfos_images,
+                                        n_surrogates,
+                                        image_keys,
+                                        result_path,
+                                        plot_distribution):
+    """
+    Compute the position of the cell in intensity comparing to surrogates
+    Args:
+        cell_id:
+        layer_dict:
+        n_surrogates:
+        image_keys:
+        result_path:
+
+    Returns:
+
+    """
+    surrogate_values = np.zeros(n_surrogates)
+
+    for index_surrogate in np.arange(n_surrogates+1):
+        sum_areas = 0
+        sum_pixels_intensity = 0
+        roll_number = np.random.randint(1, cfos_images[0].shape[0])
+        for layer, all_contours in enumerate(layer_dict.values()):
+            cfos_image = cfos_images[layer]
+            if index_surrogate > 0:
+                cfos_image = np.roll(cfos_image, roll_number, axis=(0, 1))
+            for contours in all_contours:
+                # building pixel mask from the contours
+                # converting contours as array and value as integers
+                contours_array = np.zeros((2, len(contours)), dtype="int16")
+                for contour_index, coord in enumerate(contours):
+                    contours_array[0, contour_index] = int(coord[0])
+                    contours_array[1, contour_index] = int(coord[1])
+                mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
+                # morphology.binary_fill_holes(input
+                mask_image[contours_array[1, :], contours_array[0, :]] = True
+
+                img = Image.new("L", [512, 512], 0)
+                ImageDraw.Draw(img).polygon(contours, outline=1, fill=1)
+                mask_fill = np.array(img)
+
+                area = np.sum(mask_fill)
+                sum_areas += area
+
+                pixels_intensity = np.sum(cfos_image * mask_fill)
+                sum_pixels_intensity += pixels_intensity
+        if index_surrogate == 0:
+            cell_value = sum_pixels_intensity / sum_areas
+        else:
+            surrogate_values[index_surrogate-1] = sum_pixels_intensity / sum_areas
+
+    pcos = scipy.stats.percentileofscore(surrogate_values, cell_value, kind='rank')
+    # to range the value between 0 and 1
+    if pcos > 0:
+        pcos = pcos / 100
+    print(f"{image_keys} {cell_id}: pcos {np.round(pcos, 3)}")
+    if plot_distribution:
+        plot_hist_distribution(distribution_data=surrogate_values, path_results=result_path,
+                               description=f"surrogate {image_keys} {cell_id} {str(np.round(pcos, 3))}",
+                               tight_x_range=True, values_to_scatter=np.array([cell_value]), scatter_shapes=["*"],
+                               labels=(), colors=["red"], save_formats="png")
+    return pcos
+
+
+def plot_hist_distribution(distribution_data, description, param=None, values_to_scatter=None,
+                           xticks_labelsize=10, yticks_labelsize=10, x_label_font_size=15, y_label_font_size=15,
+                           labels=None, scatter_shapes=None, colors=None, tight_x_range=False,
+                           twice_more_bins=False, background_color="black", labels_color="white",
+                           xlabel="", ylabel=None, path_results=None, save_formats="pdf",
+                           v_line=None, x_range=None,
+                           ax_to_use=None, color_to_use=None):
+    """
+    Plot a distribution in the form of an histogram, with option for adding some scatter values
+    :param distribution_data:
+    :param description:
+    :param param:
+    :param values_to_scatter:
+    :param labels:
+    :param scatter_shapes:
+    :param colors:
+    :param tight_x_range:
+    :param twice_more_bins:
+    :param xlabel:
+    :param ylabel:
+    :param save_formats:
+    :return:
+    """
+    distribution = np.array(distribution_data)
+    if color_to_use is None:
+        hist_color = "blue"
+    else:
+        hist_color = color_to_use
+    edge_color = "white"
+    if x_range is not None:
+        min_range = x_range[0]
+        max_range = x_range[1]
+    elif tight_x_range:
+        max_range = np.max(distribution)
+        min_range = np.min(distribution)
+    else:
+        max_range = 100
+        min_range = 0
+    weights = (np.ones_like(distribution) / (len(distribution))) * 100
+    if ax_to_use is None:
+        fig, ax1 = plt.subplots(nrows=1, ncols=1,
+                                gridspec_kw={'height_ratios': [1]},
+                                figsize=(12, 12))
+        ax1.set_facecolor(background_color)
+        fig.patch.set_facecolor(background_color)
+    else:
+        ax1 = ax_to_use
+    bins = int(np.sqrt(len(distribution)))
+    if twice_more_bins:
+        bins *= 2
+    hist_plt, edges_plt, patches_plt = ax1.hist(distribution, bins=bins, range=(min_range, max_range),
+                                                facecolor=hist_color,
+                                                edgecolor=edge_color,
+                                                weights=weights, log=False, label=description)
+    if values_to_scatter is not None:
+        scatter_bins = np.ones(len(values_to_scatter), dtype="int16")
+        scatter_bins *= -1
+
+        for i, edge in enumerate(edges_plt):
+            # print(f"i {i}, edge {edge}")
+            if i >= len(hist_plt):
+                # means that scatter left are on the edge of the last bin
+                scatter_bins[scatter_bins == -1] = i - 1
+                break
+
+            if len(values_to_scatter[values_to_scatter <= edge]) > 0:
+                if (i + 1) < len(edges_plt):
+                    bool_list = values_to_scatter < edge  # edges_plt[i + 1]
+                    for i_bool, bool_value in enumerate(bool_list):
+                        if bool_value:
+                            if scatter_bins[i_bool] == -1:
+                                new_i = max(0, i - 1)
+                                scatter_bins[i_bool] = new_i
+                else:
+                    bool_list = values_to_scatter < edge
+                    for i_bool, bool_value in enumerate(bool_list):
+                        if bool_value:
+                            if scatter_bins[i_bool] == -1:
+                                scatter_bins[i_bool] = i
+
+        decay = np.linspace(1.1, 1.15, len(values_to_scatter))
+        for i, value_to_scatter in enumerate(values_to_scatter):
+            if i < len(labels):
+                ax1.scatter(x=value_to_scatter, y=hist_plt[scatter_bins[i]] * decay[i], marker=scatter_shapes[i],
+                            color=colors[i], s=120, zorder=20, label=labels[i])
+            else:
+                ax1.scatter(x=value_to_scatter, y=hist_plt[scatter_bins[i]] * decay[i], marker=scatter_shapes[i],
+                            color=colors[i], s=120, zorder=20)
+    y_min, y_max = ax1.get_ylim()
+    if v_line is not None:
+        ax1.vlines(v_line, y_min, y_max,
+                   color="white", linewidth=2,
+                   linestyles="dashed", zorder=5)
+
+    ax1.legend()
+
+    if tight_x_range:
+        ax1.set_xlim(min_range, max_range)
+    else:
+        ax1.set_xlim(0, 100)
+        xticks = np.arange(0, 110, 10)
+
+        ax1.set_xticks(xticks)
+        # sce clusters labels
+        ax1.set_xticklabels(xticks)
+    ax1.yaxis.set_tick_params(labelsize=xticks_labelsize)
+    ax1.xaxis.set_tick_params(labelsize=yticks_labelsize)
+    ax1.tick_params(axis='y', colors=labels_color)
+    ax1.tick_params(axis='x', colors=labels_color)
+    # TO remove the ticks but not the labels
+    # ax1.xaxis.set_ticks_position('none')
+
+    if ylabel is None:
+        ax1.set_ylabel("Distribution (%)", fontsize=30, labelpad=20)
+    else:
+        ax1.set_ylabel(ylabel, fontsize=y_label_font_size, labelpad=20)
+    ax1.set_xlabel(xlabel, fontsize=x_label_font_size, labelpad=20)
+
+    ax1.xaxis.label.set_color(labels_color)
+    ax1.yaxis.label.set_color(labels_color)
+
+    # padding between ticks label and  label axis
+    # ax1.tick_params(axis='both', which='major', pad=15)
+
+    if ax_to_use is None:
+        fig.tight_layout()
+        if isinstance(save_formats, str):
+            save_formats = [save_formats]
+        if path_results is None:
+            path_results = param.path_results
+        time_str = ""
+        if param is not None:
+            time_str = param.time_str
+        for save_format in save_formats:
+            fig.savefig(f'{path_results}/{description}'
+                        f'_{time_str}.{save_format}',
+                        format=f"{save_format}",
+                                facecolor=fig.get_facecolor())
+
+        plt.close()
 
 def save_results_in_xls_file(result_path, data_dict):
     """
@@ -2508,14 +2731,13 @@ def save_results_in_xls_file(result_path, data_dict):
     # just to get column names
     fields_names = []
     for image_keys, cell_dict in data_dict.items():
-        if image_keys == ("summary", ):
+        if image_keys == ("summary",):
             continue
         for fields_dict in cell_dict.values():
             fields_names.extend(list(fields_dict.keys()))
             break
         break
-    fields_names.extend(list(data_dict[("summary", )].keys()))
-
+    fields_names.extend(list(data_dict[("summary",)].keys()))
 
     time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
 
@@ -2528,7 +2750,7 @@ def save_results_in_xls_file(result_path, data_dict):
     results_df = pd.DataFrame(columns=column_names)
     line_index = 1
     for image_keys, cell_dict in data_dict.items():
-        if image_keys == ("summary", ):
+        if image_keys == ("summary",):
             results_df.at[line_index, "group"] = "Summary"
             for key_summary, value_summary in cell_dict.items():
                 results_df.at[line_index, key_summary] = value_summary
@@ -2611,6 +2833,7 @@ def main_gui(mask_dir_path, red_dir_path, cfos_dir_path):
 
     sys.exit(app.exec_())
 
+
 def plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
                      input_pickle_file_name):
     """
@@ -2620,7 +2843,6 @@ def plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_pat
 
     # def press_fig_img(event):
     #     print(f"press {event.key}")
-
 
     with open(pickle_file_name, 'rb') as f:
         loaded_data_dict = pickle.load(f)
@@ -2661,14 +2883,14 @@ def plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_pat
                 print(f"layer_dict {list(layer_dict.keys())}")
                 cfos_layers = np.empty((layer_sum, cfos_images.shape[1], cfos_images.shape[2]))
                 cfos_layers[:] = np.nan
-                K=0
+                K = 0
                 for layer, all_contours in layer_dict.items():
                     try:
                         cfos_layers[K, :, :] = cfos_images[layer]
                     except Exception as exep:
                         print(exep)
                     # print(f"cfos_layers {cfos_layers}")
-                    K=K+1
+                    K = K + 1
                 cfos_image = cfos_layers.sum(axis=0)
 
                 middle_cont = int(np.round(np.mean(list(layer_dict.keys()))))
@@ -2734,6 +2956,11 @@ def plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_pat
     save_input_in_pickle(input_pickle_file_name, inputs_dict)
 
 
+def save_input_in_pickle(pickle_file, data_dict):
+    with open(pickle_file, 'wb') as f:
+        pickle.dump(data_dict, f, pickle.HIGHEST_PROTOCOL)
+
+
 if __name__ == "__main__":
     # root_path = "/Users/pappyhammer/Documents/academique/these_inmed/Lexi_Davide_project/"
     # root_path = "/media/julien/Not_today/davide_lexi_project/11-2019 Davide - cfos/ANALYSIS/"
@@ -2745,17 +2972,26 @@ if __name__ == "__main__":
     if root_path is None:
         raise Exception("Root path is None")
 
-    mask_dir_path = os.path.join(root_path, "Detection", "masques")
-    red_dir_path = os.path.join(root_path, "Detection", "cellules (red)")
-    cfos_dir_path = os.path.join(root_path, "Detection", "cfos_processed (green)")
+    # mask_dir_path = os.path.join(root_path, "Detection", "masques")
+    # red_dir_path = os.path.join(root_path, "Detection", "cellules (red)")
+    # cfos_dir_path = os.path.join(root_path, "Detection", "cfos_processed (green)")
     # cfos_filt_dir_path = os.path.join(root_path, "Detection", "cfos_filtered (green)")
 
-    result_path = os.path.join(root_path, "ANALYSIS", "results")
+    mask_dir_path = os.path.join(root_path, "masques")
+    red_dir_path = os.path.join(root_path, "cellules (red)")
+    cfos_dir_path = os.path.join(root_path, "cfos (green)")
 
-    # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
-    pickle_file_name = os.path.join(result_path, "FINAL2.pkl")
+    # result_path = os.path.join(root_path, "ANALYSIS", "results")
+    result_path = os.path.join(root_path, "results")
 
-    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
-    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
+    pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
+    # pickle_file_name = os.path.join(result_path, "FINAL2.pkl")
+
+    time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
+    result_path = os.path.join(result_path, time_str)
+    os.mkdir(result_path)
+
+    # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
     # plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
     # input_pickle_file_name=os.path.join(result_path, "double_staining.pkl"))
