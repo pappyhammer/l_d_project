@@ -2417,7 +2417,7 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             percentile_value = get_cell_percentile_over_surrogates(cell_id=cell_id,
                                                                    layer_dict=layer_dict,
                                                                    cfos_images=cfos_images,
-                                                                   n_surrogates=1000,
+                                                                   n_surrogates=10000,
                                                                    image_keys=image_keys,
                                                                    plot_distribution=True,
                                                                    result_path=result_path)
