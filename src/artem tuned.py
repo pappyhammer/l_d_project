@@ -2531,11 +2531,13 @@ def get_cell_percentile_over_surrogates(cell_id,
     for index_surrogate in np.arange(n_surrogates+1):
         sum_areas = 0
         sum_pixels_intensity = 0
-        roll_number = np.random.randint(1, cfos_images[0].shape[0])
+        roll_axis_0 = np.random.randint(1, cfos_images[0].shape[0])
+        roll_axis_1 = np.random.randint(1, cfos_images[0].shape[1])
         for layer, all_contours in enumerate(layer_dict.values()):
             cfos_image = cfos_images[layer]
             if index_surrogate > 0:
-                cfos_image = np.roll(cfos_image, roll_number, axis=(0, 1))
+                cfos_image = np.roll(cfos_image, roll_axis_0, axis=0)
+                cfos_image = np.roll(cfos_image, roll_axis_1, axis=1)
             for contours in all_contours:
                 # building pixel mask from the contours
                 # converting contours as array and value as integers
