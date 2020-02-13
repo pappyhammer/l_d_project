@@ -709,6 +709,8 @@ class RoisManager:
     def update_colors(self):
         # go over all ROIs (PolyLine and Line), and according to their cell_id, change their color
         for layer in range(self.n_layers):
+            if layer not in self.rois_by_layer_dict:
+                continue
             for display_key in self.rois_by_layer_dict[layer]:
                 for pg_roi in self.rois_by_layer_dict[layer][display_key]:
                     cell_id = pg_roi.cell_id
@@ -2986,14 +2988,14 @@ if __name__ == "__main__":
     # result_path = os.path.join(root_path, "ANALYSIS", "results")
     result_path = os.path.join(root_path, "results")
 
-    pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
+    pickle_file_name = os.path.join(root_path, "pkl_files", "fusion-fin.pkl")
     # pickle_file_name = os.path.join(result_path, "FINAL2.pkl")
 
     time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
     result_path = os.path.join(result_path, time_str)
     os.mkdir(result_path)
 
-    # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
-    analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
+    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
     # plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
     # input_pickle_file_name=os.path.join(result_path, "double_staining.pkl"))
