@@ -22,6 +22,8 @@ from shapely.geometry import Polygon, MultiPoint
 import pandas as pd
 from datetime import datetime
 import scipy.stats
+from bisect import bisect_right
+import scipy.stats
 
 # TODO: ('GroupA', 'N1', 'ventr', 's1', 'dist')
 
@@ -80,7 +82,7 @@ def get_tiff_names(red_dir_path, cfos_dir_path, mask_dir_path, verbose=False):
         # now we parse all file_names and distribute them in the right category
         # typical file_name red-GroupA-F1-dors-s1-dist.tif
         for file_name in file_names:
-            print(f"file_name {file_name}")
+            # print(f"file_name {file_name}")
             index_group = file_name.index("-")
             file_name_cropped = file_name[index_group + 1:]
             index_f = file_name_cropped.index("-")
@@ -2221,6 +2223,8 @@ class CellsDisplayMainWidget(pg.GraphicsLayoutWidget):
 
 def get_data_in_dict_from_keys(list_keys, data_dict):
     if len(list_keys) > 0:
+        if list_keys[0] not in data_dict:
+            return dict()
         return get_data_in_dict_from_keys(list_keys[1:], data_dict[list_keys[0]])
     return data_dict
 
@@ -2355,7 +2359,8 @@ class PlanMask:
         plt.close()
 
 
-def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path):
+def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
+                        with_surrogates=False):
     """
     Analyse the data that has been saved using the GUI
     :return:
@@ -2415,14 +2420,17 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
             # cfos_matrix = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
             # cfos_matrix_z_score = np.zeros((len(layer_dict), cfos_images[0].shape[0], cfos_images[0].shape[1]))
 
-            # value between 0 and 1 representing the position of the cell in intensity comparing to surrogates
-            percentile_value = get_cell_percentile_over_surrogates(cell_id=cell_id,
-                                                                   layer_dict=layer_dict,
-                                                                   cfos_images=cfos_images,
-                                                                   n_surrogates=10000,
-                                                                   image_keys=image_keys,
-                                                                   plot_distribution=True,
-                                                                   result_path=result_path)
+            if with_surrogates:
+                # value between 0 and 1 representing the position of the cell in intensity comparing to surrogates
+                percentile_value = get_cell_percentile_over_surrogates(cell_id=cell_id,
+                                                                       layer_dict=layer_dict,
+                                                                       cfos_images=cfos_images,
+                                                                       n_surrogates=10000,
+                                                                       image_keys=image_keys,
+                                                                       plot_distribution=True,
+                                                                       result_path=result_path)
+            else:
+                percentile_value = 0
             for layer, all_contours in enumerate(layer_dict.values()):
                 cfos_image = cfos_images[layer]
                 # normalizing cfos image, z_score
@@ -2509,6 +2517,206 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
     save_results_in_xls_file(result_path, data_dict)
 
 
+def plot_cdf_from_surrogate_distrib(dir_files, result_path, bonus_str=""):
+    file_names = []
+
+    # look for filenames in the fisrst directory, if we don't break, it will go through all directories
+    for (dirpath, dirnames, local_filenames) in os.walk(dir_files):
+        file_names.extend(local_filenames)
+        break
+
+    conditions = ['H', 'N', 'F']
+    conditions_color = {'H': "red", 'N': "blue", 'F': "black"}
+    distributions_dict = dict()
+    all_values = None
+    for file_name in file_names:
+        for condition in conditions:
+            if condition in file_name and file_name.endswith(".npy"):
+                distributions_dict[condition] = np.sort(np.load(os.path.join(dir_files, file_name)))
+                if all_values is None:
+                    all_values = distributions_dict[condition]
+                else:
+                    all_values = np.concatenate((all_values, distributions_dict[condition]))
+    all_values = np.unique(all_values)
+    if bonus_str == "z_score":
+        intensity_intervals = np.arange(int(np.min(all_values)), np.ceil(np.max(all_values))+1, 0.05)
+    else:
+        intensity_intervals = np.arange(int(np.min(all_values)), np.ceil(np.max(all_values))+1, 1)
+
+    cdf_dict = dict()
+    for condition, distribution in distributions_dict.items():
+        cdf_dict[condition] = np.zeros(len(intensity_intervals))
+        values, counts = np.unique(distribution, return_counts=True)
+        for value, count in zip(values, counts):
+            interval_index = bisect_right(intensity_intervals, value) - 1
+            cdf_dict[condition][interval_index] = count
+        cdf_dict[condition] = (cdf_dict[condition] / np.sum(cdf_dict[condition])) * 100
+        # now sum should be equal to 100
+        cdf_dict[condition] = np.cumsum(cdf_dict[condition])
+
+    print(f"## {bonus_str}")
+    for index, condition_1 in enumerate(conditions[:-1]):
+        for condition_2 in conditions[index+1:]:
+            d_ks, p_value = scipy.stats.ks_2samp(distributions_dict[condition_1], distributions_dict[condition_2])
+            print(f"{condition_1} vs {condition_2}: D={np.round(d_ks, 3)}, p={p_value}")
+
+    fig, ax1 = plt.subplots(nrows=1, ncols=1,
+                            figsize=(8, 8))
+
+    for condition, cdf in cdf_dict.items():
+        ax1.plot(intensity_intervals, cdf, c=conditions_color[condition], linewidth=2, label=condition)
+
+    plt.legend()
+    plt.xlabel("Pixel intensity", fontweight="bold", fontsize=12, labelpad=10)
+    # ax1.set_xscale("log")
+    plt.ylabel("Cumulative percent", fontweight="bold", fontsize=12, labelpad=10)
+    time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
+
+    fig.savefig(f'{result_path}/cdf_{bonus_str}_{time_str}.pdf',
+                format="pdf")
+    plt.close()
+
+def compare_condition_surrogates_distributions(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path,
+                                               result_path, n_surrogates, conditions_to_explore=('F', 'N', 'H'),
+                                               with_z_score=False):
+    print("### Function compare_condition_surrogates_distributions() ###")
+    with open(pickle_file_name, 'rb') as f:
+        loaded_data_dict = pickle.load(f)
+
+    # n_layers = 7
+    # the key is a tuple representing the image
+    # value is a dict with key is an int representing the cell
+    # than value is a dict with each key the field description and value the corresponding value
+    data_dict = SortedDict()
+    images_dict = get_tiff_names(red_dir_path=red_dir_path, cfos_dir_path=cfos_dir_path,
+                                 mask_dir_path=mask_dir_path)
+
+    all_image_keys = get_tree_dict_as_a_list(images_dict)
+
+    # key being 'F', 'N', 'H'
+    condition_distribs = dict()
+    for condition_key in conditions_to_explore:
+        condition_distribs[condition_key] = np.zeros(0)
+
+    print(f"N images {len(loaded_data_dict)}")
+    index_image_keys = 1
+    for image_keys, pre_computed_data in loaded_data_dict.items():
+        print(f"{index_image_keys}) image_keys: {image_keys}")
+        index_image_keys += 1
+        images_data_dict = get_data_in_dict_from_keys(list_keys=image_keys, data_dict=images_dict)
+        if len(images_data_dict) == 0:
+            print("NOT FOUND")
+            continue
+        cfos_images = get_image_from_tiff(file_name=images_data_dict["cfos"])
+        data_dict[image_keys] = SortedDict()
+        # novel condition
+        condition_key = image_keys[1][0]
+        if condition_key not in conditions_to_explore:
+            continue
+
+        surrogate_values = surrogate_virtual_cell(cfos_images,
+                                                  n_surrogates, with_z_score=with_z_score)
+        condition_distribs[condition_key] = np.concatenate((condition_distribs[condition_key], surrogate_values))
+
+    extra_info = ""
+    if with_z_score:
+        extra_info = "_z_score"
+    # first we save each distribution in a npy file
+    for condition_key, surrogate_values in condition_distribs.items():
+        np.save(os.path.join(result_path, f"surrogates_{condition_key}{extra_info}.npy"), surrogate_values)
+
+    # then plotting them
+    for condition_key, surrogate_values in condition_distribs.items():
+        plot_hist_distribution(distribution_data=surrogate_values, path_results=result_path,
+                               description=f"surrogate_condition_{condition_key}{extra_info}",
+                               tight_x_range=True, save_formats="png")
+
+def create_circle_contour(pos, radius=30):
+    """
+    Create a contour as a circke
+    Args:
+        pos: tuple of int representing x and y
+        radius: radius
+
+    Returns: a list of tuple (x, y) representing the contour coordinates
+
+    """
+    # from https://stackoverflow.com/questions/32092899/plot-equation-showing-a-circle/32093458
+    # theta goes from 0 to 2pi
+    n_points = 10
+    theta = np.linspace(0, 2 * np.pi, n_points)
+
+    # the radius of the circle
+    r = np.sqrt(30)
+
+    # compute x1 and x2
+    x_values = r * np.cos(theta) + pos[0]
+    y_values = r * np.sin(theta) + pos[1]
+
+    contours = list()
+    for x_value, y_value in zip(x_values, y_values):
+        contours.append((x_value, y_value))
+
+    return contours
+
+
+def surrogate_virtual_cell(cfos_images,
+                           n_surrogates, with_z_score):
+    """
+    Create a cell in a number of layer and return the distribution of the n_surrogates. pixels / area
+    Args:
+        layer_dict:
+        cfos_images:
+        n_surrogates:
+        image_keys:
+
+    Returns:
+
+    """
+    surrogate_values = np.zeros(n_surrogates)
+
+    for index_surrogate in np.arange(n_surrogates):
+        sum_areas = 0
+        sum_pixels_intensity = 0
+        roll_axis_0 = np.random.randint(1, cfos_images[0].shape[0])
+        roll_axis_1 = np.random.randint(1, cfos_images[0].shape[1])
+        # picking 2 to 5 layers
+        n_layers = np.random.randint(2, 5)
+        layers = np.arange(7)
+        np.random.shuffle(layers)
+        for layer in layers[:n_layers]:
+            cfos_image = cfos_images[layer]
+            if with_z_score:
+                cfos_image = cfos_image - np.mean(cfos_image)
+                if np.std(cfos_image) > 0:
+                    cfos_image = cfos_image / np.std(cfos_image)
+            cfos_image = np.roll(cfos_image, roll_axis_0, axis=0)
+            cfos_image = np.roll(cfos_image, roll_axis_1, axis=1)
+            contours = create_circle_contour((cfos_image.shape[1] // 2, cfos_image.shape[0] // 2), radius=30)
+            # building pixel mask from the contours
+            # converting contours as array and value as integers
+            contours_array = np.zeros((2, len(contours)), dtype="int16")
+            for contour_index, coord in enumerate(contours):
+                contours_array[0, contour_index] = int(coord[0])
+                contours_array[1, contour_index] = int(coord[1])
+            mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
+            # morphology.binary_fill_holes(input
+            mask_image[contours_array[1, :], contours_array[0, :]] = True
+
+            img = Image.new("L", [512, 512], 0)
+            ImageDraw.Draw(img).polygon(contours, outline=1, fill=1)
+            mask_fill = np.array(img)
+
+            area = np.sum(mask_fill)
+            sum_areas += area
+
+            pixels_intensity = np.sum(cfos_image * mask_fill)
+            sum_pixels_intensity += pixels_intensity
+        surrogate_values[index_surrogate] = sum_pixels_intensity / sum_areas
+
+    return surrogate_values
+
+
 def get_cell_percentile_over_surrogates(cell_id,
                                         layer_dict,
                                         cfos_images,
@@ -2530,11 +2738,12 @@ def get_cell_percentile_over_surrogates(cell_id,
     """
     surrogate_values = np.zeros(n_surrogates)
 
-    for index_surrogate in np.arange(n_surrogates+1):
+    for index_surrogate in np.arange(n_surrogates + 1):
         sum_areas = 0
         sum_pixels_intensity = 0
         roll_axis_0 = np.random.randint(1, cfos_images[0].shape[0])
         roll_axis_1 = np.random.randint(1, cfos_images[0].shape[1])
+        # TODO: Add random layer
         for layer, all_contours in enumerate(layer_dict.values()):
             cfos_image = cfos_images[layer]
             if index_surrogate > 0:
@@ -2563,7 +2772,7 @@ def get_cell_percentile_over_surrogates(cell_id,
         if index_surrogate == 0:
             cell_value = sum_pixels_intensity / sum_areas
         else:
-            surrogate_values[index_surrogate-1] = sum_pixels_intensity / sum_areas
+            surrogate_values[index_surrogate - 1] = sum_pixels_intensity / sum_areas
 
     pcos = scipy.stats.percentileofscore(surrogate_values, cell_value, kind='rank')
     # to range the value between 0 and 1
@@ -2715,9 +2924,10 @@ def plot_hist_distribution(distribution_data, description, param=None, values_to
             fig.savefig(f'{path_results}/{description}'
                         f'_{time_str}.{save_format}',
                         format=f"{save_format}",
-                                facecolor=fig.get_facecolor())
+                        facecolor=fig.get_facecolor())
 
         plt.close()
+
 
 def save_results_in_xls_file(result_path, data_dict):
     """
@@ -2988,14 +3198,23 @@ if __name__ == "__main__":
     # result_path = os.path.join(root_path, "ANALYSIS", "results")
     result_path = os.path.join(root_path, "results")
 
-    pickle_file_name = os.path.join(root_path, "pkl_files", "fusion-fin.pkl")
+    pickle_file_name = os.path.join(root_path, "pkl_files", "FIN-FIN.pkl")
+    # pickle_file_name = os.path.join(root_path, "pkl_files", "2Dorsal-22-01_lexi.pkl")
     # pickle_file_name = os.path.join(result_path, "FINAL2.pkl")
 
     time_str = datetime.now().strftime("%Y_%m_%d.%H-%M-%S")
     result_path = os.path.join(result_path, time_str)
     os.mkdir(result_path)
 
-    main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
-    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path)
+    # main_gui(mask_dir_path, red_dir_path, cfos_dir_path)
+    # analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
+    #                     with_surrogates=False)
+    # compare_condition_surrogates_distributions(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path,
+    #                                            result_path, n_surrogates=10000, conditions_to_explore=('F', 'N', 'H'),
+    #                                            with_z_score=False)
+    plot_cdf_from_surrogate_distrib(dir_files=os.path.join(root_path, "results", "surrogates_z_score"),
+                                    result_path=result_path, bonus_str="z_score")
+    plot_cdf_from_surrogate_distrib(dir_files=os.path.join(root_path, "results", "surrogates"),
+                                    result_path=result_path, bonus_str="normal")
     # plot_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_path, result_path,
     # input_pickle_file_name=os.path.join(result_path, "double_staining.pkl"))
