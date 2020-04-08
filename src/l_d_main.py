@@ -2403,8 +2403,8 @@ def analyse_manual_data(pickle_file_name, mask_dir_path, red_dir_path, cfos_dir_
                         contours_array[0, contour_index] = int(coord[0])
                         contours_array[1, contour_index] = int(coord[1])
                     mask_image = np.zeros(cfos_image.shape[:2], dtype="bool")
-                    # morphology.binary_fill_holes(input
                     mask_image[contours_array[1, :], contours_array[0, :]] = True
+                    # morphology.binary_fill_holes(mask_image)
                     check_pos_by_plotting = False
                     if check_pos_by_plotting:
                         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True)
